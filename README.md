@@ -3,6 +3,8 @@
 This project can run on python3.8
 ## Install
 ```bash
+git clone git@github.com:YilingQiao/diffquantum.git
+cd diffquantum
 pip install -r requirements.txt
 ```
 ## Demos
