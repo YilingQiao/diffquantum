@@ -12,11 +12,11 @@ pip install -r requirements.txt
 ```bash
 python grape.py
 ```
-2. Compare my pulse-based simulation with qutip.
+2. Compare the forward simulation results of my pulse-based simulation with that of qutip.
 ```bash
 python  compare_our_grape_with_qutip.py
 ```
-3. Use our method to optimize Fourier coefficient.
+3. Use our method to optimize Fourier coefficient. You can compare the energy with the results in 1, which should be the same.
 ```bash
 python  ours_spectral.py
 ```

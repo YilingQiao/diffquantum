@@ -1,23 +1,6 @@
 import torch
 import numpy as np
 
-def c_to_r_mat(M):
-    # complex to real isomorphism for matrix
-    return np.asarray(np.bmat([[M.real, -M.imag],[M.imag, M.real]]))
-
-def c_to_r_vec(V):
-    # complex to real isomorphism for vector
-    new_v = []
-    new_v.append(V.real)
-    new_v.append(V.imag)
-    return np.reshape(new_v, [2 * len(V)])
-
-def random_initialize_u(n_step, n_Hs):
-    initial_mean = 0
-    initial_stddev = (1. / np.sqrt(n_step))
-    u = np.random.normal(initial_mean, initial_stddev, [n_step ,n_Hs])
-    return u
-
 
 class Grape(object):
     """A class for pulse-based simulation and optimization
@@ -43,12 +26,12 @@ class Grape(object):
         n_epoch = 200
         w_l2 = 1
         max_amplitude = torch.from_numpy(4 * np.ones(len(Hs)))
-        Hs = [torch.tensor(c_to_r_mat(-1j * dt * H)) for H in Hs]
-        H0 = torch.tensor(c_to_r_mat(-1j * dt * H0)) 
+        Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
+        H0 = torch.tensor(self.c_to_r_mat(-1j * dt * H0)) 
         us = torch.tensor(init_u, requires_grad=True)
         optimizer = torch.optim.Adam([us], lr=lr)
-        initial_states = torch.tensor(initial_states).double().transpose(1, 0)
-        target_states = torch.tensor(target_states).double().transpose(1, 0)
+        initial_states = torch.tensor(np.array(initial_states)).double().transpose(1, 0)
+        target_states = torch.tensor(np.array(target_states)).double().transpose(1, 0)
 
         for epoch in range(n_epoch):
             modifled_us = torch.sin(us) * max_amplitude
@@ -176,6 +159,26 @@ class Grape(object):
             op += Hn / factorial
         return op
 
+    @staticmethod
+    def c_to_r_mat(M):
+        # complex to real isomorphism for matrix
+        return np.asarray(np.bmat([[M.real, -M.imag],[M.imag, M.real]]))
+
+    @staticmethod
+    def c_to_r_vec(V):
+        # complex to real isomorphism for vector
+        new_v = []
+        new_v.append(V.real)
+        new_v.append(V.imag)
+        return np.reshape(new_v, [2 * len(V)])
+        
+    @staticmethod
+    def random_initialize_u(n_step, n_Hs):
+        initial_mean = 0
+        initial_stddev = (1. / np.sqrt(n_step))
+        u = np.random.normal(initial_mean, initial_stddev, [n_step ,n_Hs])
+        return u
+
     def demo_fidelity(self):
         """demo of control the psi(1) to be the target states.
         """
@@ -201,10 +204,10 @@ class Grape(object):
         psi0 = [g, e]
             
         psi1 = [e, g]
-        target_states = [c_to_r_vec(v) for v in psi1]
-        initial_states = [c_to_r_vec(v) for v in psi0]
+        target_states = [self.c_to_r_vec(v) for v in psi1]
+        initial_states = [self.c_to_r_vec(v) for v in psi0]
 
-        init_u = random_initialize_u(n_step, len(Hs))
+        init_u = self.random_initialize_u(n_step, len(Hs))
         final_u = self.train_fidelity(init_u, H0, Hs, initial_states, target_states, dt)
 
     def demo_energy(self):
@@ -215,7 +218,7 @@ class Grape(object):
         dt = 0.01
         n_step = 100
         M = np.array([[1, 3 + 1.j], [3 - 1.j, 2]])
-        M = c_to_r_mat(M)
+        M = self.c_to_r_mat(M)
 
         Q_x = np.diag(np.sqrt(np.arange(1, qubit_state_num)), 1) \
                 + np.diag(np.sqrt(np.arange(1, qubit_state_num)), -1)
@@ -227,9 +230,9 @@ class Grape(object):
 
         g = np.array([1,0])
         e = np.array([0,1])
-        psi0 = c_to_r_vec(g)
+        psi0 = self.c_to_r_vec(g)
 
-        init_u = random_initialize_u(n_step, len(Hs))
+        init_u = self.random_initialize_u(n_step, len(Hs))
         final_u = self.train_energy(M, init_u, H0, Hs, psi0, dt)
 
 if __name__ == '__main__':

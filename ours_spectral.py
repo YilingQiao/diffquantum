@@ -1,7 +1,8 @@
-from qutip import *
+import qutip as qp
 import numpy as np
 import matplotlib.pyplot as plt
-from grape import *
+import torch
+# from grape import *
 
 class OurSpectral(object):
     """A class for using Fourier series to represent the amplitudes.
@@ -40,21 +41,21 @@ class OurSpectral(object):
         grad_coeff = np.zeros(self.spectral_coeff.shape)
         s = np.random.uniform()
         t0s = np.linspace(0, s, self.n_step)
-        result = mesolve(H, initial_state, t0s)
+        result = qp.mesolve(H, initial_state, t0s)
         phi = result.states[-1]
         
         ts1 = np.linspace(s, 1, self.n_step)
         r = 1
 
         for i in range(self.n_Hs):
-            gate_p = qeye(2) + r * 1.j * H[i+1][0]
-            gate_m = qeye(2) - r * 1.j * H[i+1][0]
+            gate_p = qp.qeye(2) + r * 1.j * H[i+1][0]
+            gate_m = qp.qeye(2) - r * 1.j * H[i+1][0]
             
-            result = mesolve(H, gate_p * phi, ts1)
+            result = qp.mesolve(H, gate_p * phi, ts1)
             ket_p = result.states[-1]
             ps_p = M.matrix_element(ket_p, ket_p)
 
-            result = mesolve(H, gate_m * phi, ts1)
+            result = qp.mesolve(H, gate_m * phi, ts1)
             ket_m = result.states[-1]
             ps_m = M.matrix_element(ket_m, ket_m)
 
@@ -84,7 +85,7 @@ class OurSpectral(object):
         lr = 2e-2
         n_epoch = 200
         w_l2 = 1
-        I = qeye(2)
+        I = qp.qeye(2)
         ts = np.linspace(0, 1, n_step) 
 
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
@@ -92,7 +93,7 @@ class OurSpectral(object):
             H = [H0]
             for i in range(self.n_Hs):
                 H.append([Hs[i], self.generate_u(i)])
-            result = mesolve(H, initial_state, ts)
+            result = qp.mesolve(H, initial_state, ts)
             final_state = result.states[-1]
 
             loss_energy = M.matrix_element(final_state, final_state)
@@ -109,13 +110,13 @@ class OurSpectral(object):
         return self.spectral_coeff
 
     def demo_energy(self):
-        Hs = [sigmax()]
-        H0 = qeye(2)
-        g, e = basis(2, 0), basis(2, 1)
+        Hs = [qp.sigmax()]
+        H0 = qp.qeye(2)
+        g, e = qp.basis(2, 0), qp.basis(2, 1)
         psi0 = g
         n_step = 100
         M = np.array([[1, 3 + 1.j], [3 - 1.j, 2]])
-        M = Qobj(M)
+        M = qp.Qobj(M)
         self.train_energy(M, H0, Hs, psi0, n_step)
 
 if __name__ == '__main__':
