@@ -9,10 +9,11 @@ class OurSpectral(object):
     Args:
         n_basis: number of Fourier basis.
     """
-    def __init__(self, n_basis=3):
+    def __init__(self, n_basis=5, basis='poly'):
         self.n_basis = n_basis
         self.log_dir = "./logs/"
         self.log_name = 'OurSpectral'
+        self.basis = basis
 
     def generate_u(self, i):
         """Generate the function u(i) for H_i
@@ -25,7 +26,10 @@ class OurSpectral(object):
             coeff_i = self.spectral_coeff.detach().numpy()[i]
             u = 0
             for j in range(self.n_basis):
-                u += coeff_i[j] * np.cos(2 * np.pi * j * t)
+                if self.basis:
+                    u += coeff_i[j] * (t - 0.5)**j
+                else:
+                    u += coeff_i[j] * np.cos(2 * np.pi * j * t)
             return u
         return _u
 
@@ -63,7 +67,10 @@ class OurSpectral(object):
             ps = (0.5 / r * (ps_m - ps_p)).real
 
             for j in range(self.n_basis):
-                grad_coeff[i][j] = np.cos(2 * np.pi * j * s) * ps
+                if self.basis == 'poly':
+                    grad_coeff[i][j] = (s-0.5)**j * ps
+                else:
+                    grad_coeff[i][j] = np.cos(2 * np.pi * j * s) * ps
 
         return torch.from_numpy(grad_coeff)
 
@@ -96,7 +103,7 @@ class OurSpectral(object):
 
         lr = 2e-2
         n_epoch = 100
-        w_l2 = 1e2
+        w_l2 = 0
         I = qp.qeye(2)
         ts = np.linspace(0, 1, n_step) 
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
@@ -144,6 +151,7 @@ class OurSpectral(object):
         XX = np.kron(X, X)
         IZ = np.kron(I, Z)
         ZI = np.kron(Z, I)
+        YI = np.kron(Y, I)
         ZZ = np.kron(Z, Z)
         I = qp.Qobj(I)
         X = qp.Qobj(X)
@@ -152,10 +160,11 @@ class OurSpectral(object):
         XX = qp.Qobj(XX)
         IZ = qp.Qobj(IZ)
         ZI = qp.Qobj(ZI)
+        YI = qp.Qobj(YI)
         ZZ = qp.Qobj(ZZ) 
 
         H0 = ZZ
-        Hs = [XX, IZ]
+        Hs = [XX, IZ, YI]
 
         g = np.array([1,0])
         e = np.array([0,1])
@@ -206,7 +215,7 @@ class OurSpectral(object):
 
 if __name__ == '__main__':
     ours_spectral = OurSpectral()
-    ours_spectral.demo_energy_qubit1()
-    # ours_spectral.demo_energy_qubit2()
+    # ours_spectral.demo_energy_qubit1()
+    ours_spectral.demo_energy_qubit2()
     # ours_spectral.demo_energy()
 

@@ -281,12 +281,13 @@ class Grape(object):
                     [0, -1]])
 
         XX = np.kron(X, X)
+        YI = np.kron(Y, I)
         IZ = np.kron(I, Z)
         ZI = np.kron(Z, I)
         ZZ = np.kron(Z, Z)
 
         H0 = ZZ
-        Hs = [XX, IZ]
+        Hs = [XX, IZ, YI]
 
         g = np.array([1,0])
         e = np.array([0,1])
@@ -305,5 +306,5 @@ class Grape(object):
 if __name__ == '__main__':
     grape = Grape(taylor_terms=20)
     # grape.demo_fidelity()
-    grape.demo_energy_qubit1()
-    # grape.demo_energy_qubit2()
+    # grape.demo_energy_qubit1()
+    grape.demo_energy_qubit2()
