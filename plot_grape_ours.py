@@ -3,15 +3,27 @@ import matplotlib.pyplot as plt
 from ours_spectral import OurSpectral
 from grape import Grape
 
-n_parameters = 4
-ours_spectral = OurSpectral(n_basis=n_parameters)
-ours_spectral.demo_energy()
+n_parameters = 8
+n_epoch = 200
+grape = Grape(taylor_terms=20, n_step=n_parameters, n_epoch=n_epoch)
+grape.demo_energy_qubit2()
+loss_grape = grape.losses_energy
 
-grape = Grape(taylor_terms=20, n_step=n_parameters)
-grape.demo_energy()
+
+ours_legendre = OurSpectral(n_basis=n_parameters, basis='Legendre', n_epoch=n_epoch)
+ours_legendre.demo_energy_qubit2()
+loss_legendre = ours_legendre.losses_energy
+
+
+ours_fourier = OurSpectral(n_basis=n_parameters, basis='Fourier', n_epoch=n_epoch)
+ours_fourier.demo_energy_qubit2()
+loss_fourier = ours_fourier.losses_energy
 
 plt.clf()
-plt.plot(grape.losses_energy, label='grape')
-plt.plot(ours_spectral.losses_energy, label='ours_spectral')
+plt.plot(loss_grape, label='grape')
+plt.plot(loss_fourier, label='Fourier')
+plt.plot(loss_legendre, label='Legendre')
 plt.legend(loc="upper right")
-plt.savefig("{}{}_{}.png".format(grape.log_dir, grape.log_name, ours_spectral.log_name))
+plt.savefig("{}_{}.png".format(grape.log_dir, 'losses_energy'))
+plt.yscale('log')
+plt.savefig("{}_{}.png".format(grape.log_dir, 'losses_energy_log'))

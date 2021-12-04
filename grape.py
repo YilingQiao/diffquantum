@@ -8,11 +8,12 @@ class Grape(object):
     Args:
         taylor_terms: number of taylor expansion terms.
     """
-    def __init__(self, taylor_terms=5, n_step=100):
+    def __init__(self, taylor_terms=5, n_step=100, n_epoch=200):
         self.taylor_terms = taylor_terms
         self.n_step = n_step
         self.log_dir = "./logs/"
         self.log_name = 'grape'
+        self.n_epoch = n_epoch
 
     def train_fidelity(self, init_u, H0, Hs, initial_states, target_states, dt):
         """Control the systems to reach target states.
@@ -27,7 +28,6 @@ class Grape(object):
             us: optimized pulses.
         """
         lr = 3e-3
-        n_epoch = 200
         w_l2 = 1
         max_amplitude = torch.from_numpy(4 * np.ones(len(Hs)))
         Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
@@ -37,7 +37,7 @@ class Grape(object):
         initial_states = torch.tensor(np.array(initial_states)).double().transpose(1, 0)
         target_states = torch.tensor(np.array(target_states)).double().transpose(1, 0)
 
-        for epoch in range(n_epoch):
+        for epoch in range(self.n_epoch):
             modifled_us = torch.sin(us) * max_amplitude
             final_states = self.forward_simulate(modifled_us, H0, Hs, initial_states)
             loss_fidelity = 1 - self.get_inner_product_2D(final_states, target_states)
@@ -56,8 +56,12 @@ class Grape(object):
     def save_plot(self, plot_name, us):
         np_us = us.detach().numpy()
         plt.clf()
+        x = np.array([i * (1. / self.n_step) for i in range(self.n_step + 1)])
         for j in range(us.shape[1]):
-            plt.plot(np_us[:, j], label='{} u_{}'.format(self.log_name,  j))
+            y = [i for i in np_us[:, j]]
+            y = np.array([y[0]] + y)
+            plt.step(x, y, label='{} u_{}'.format(self.log_name,  j))
+            # plt.plot(np_us[:, j], label='{} u_{}'.format(self.log_name,  j))
         plt.legend(loc="upper right")
         plt.savefig("{}{}_{}.png".format(self.log_dir, self.log_name, plot_name))
 
@@ -74,7 +78,6 @@ class Grape(object):
             us: optimized pulses.
         """
         lr = 2e-2
-        n_epoch = 100
         w_l2 = 1e-3
         Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
         H0 = torch.tensor(self.c_to_r_mat(-1j * dt * H0)) 
@@ -85,7 +88,7 @@ class Grape(object):
 
         self.losses_energy = []
 
-        for epoch in range(n_epoch + 1):
+        for epoch in range(self.n_epoch + 1):
             if epoch % 20 == 0:
                 self.save_plot(epoch, us)
             v = self.forward_simulate(us, H0, Hs, initial_states)
@@ -94,6 +97,7 @@ class Grape(object):
             loss = loss_energy + loss_l2 * w_l2
             optimizer.zero_grad()
             loss.backward()
+            # print(us.grad.norm())
             optimizer.step()
 
             print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
@@ -194,9 +198,22 @@ class Grape(object):
         
     @staticmethod
     def random_initialize_u(n_step, n_Hs):
-        initial_mean = 0
-        initial_stddev = 1e-3 # (1. / np.sqrt(n_step))
-        u = np.random.normal(initial_mean, initial_stddev, [n_step ,n_Hs])
+        # initial_mean = 0
+        # initial_stddev = 1e-3 # (1. / np.sqrt(n_step))
+        # u = np.random.normal(initial_mean, initial_stddev, [n_step ,n_Hs])
+
+        def f(t):
+            n = int(n_step / 2)
+            u = 0   
+            for j in range(n):
+                    u += np.cos(2 * np.pi * j * t) \
+                        + np.sin(2 * np.pi * j * t) 
+            return u
+
+        u = np.array([[f(t) for i in range(n_Hs)] for t in np.linspace(0, 1, n_step)])
+        # plt.plot(u[:,0])
+        # plt.show()
+        # exit()
         return u
 
     def demo_fidelity(self):
@@ -205,7 +222,7 @@ class Grape(object):
         qubit_state_num = 2
         qubit_num = 1
         freq_ge = 3.9 # GHz
-        dt = 0.01
+        dt = 1./self.n_step
         n_step = 100
 
         Q_x = np.diag(np.sqrt(np.arange(1, qubit_state_num)), 1) \
@@ -267,9 +284,6 @@ class Grape(object):
         qubit_state_num = 2
         qubit_num = 2
         dt = 1./self.n_step
-        M = np.kron(np.array([[1, 3 + 1.j], [3 - 1.j, 2]]),
-                    np.eye(2))
-        M = self.c_to_r_mat(M)
 
         I = np.array([[1, 0], 
                     [0, 1]])
@@ -280,14 +294,24 @@ class Grape(object):
         Z = np.array([[1, 0], 
                     [0, -1]])
 
+        XI = np.kron(X, I)
+        IX = np.kron(I, X)
         XX = np.kron(X, X)
-        YI = np.kron(Y, I)
+        YY = np.kron(Y, Y)
         IZ = np.kron(I, Z)
         ZI = np.kron(Z, I)
+        YI = np.kron(Y, I)
         ZZ = np.kron(Z, Z)
+        OO = ZZ * 0
+        H0 = OO
 
-        H0 = ZZ
-        Hs = [XX, IZ, YI]
+        M = 0.5*XX + 0.2*YY + ZZ + IZ
+        # M = np.kron(np.array([[1, 3 + 1.j], [3 - 1.j, 2]]),
+        #             np.eye(2))
+        M = self.c_to_r_mat(M)
+
+        Hs = [ZZ, IX, XI]
+        # Hs = [XX, IZ, ZI]
 
         g = np.array([1,0])
         e = np.array([0,1])
