@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class Grape(object):
@@ -7,8 +8,11 @@ class Grape(object):
     Args:
         taylor_terms: number of taylor expansion terms.
     """
-    def __init__(self, taylor_terms=5):
+    def __init__(self, taylor_terms=5, n_step=100):
         self.taylor_terms = taylor_terms
+        self.n_step = n_step
+        self.log_dir = "./logs/"
+        self.log_name = 'grape'
 
     def train_fidelity(self, init_u, H0, Hs, initial_states, target_states, dt):
         """Control the systems to reach target states.
@@ -49,6 +53,14 @@ class Grape(object):
             )
         return us
 
+    def save_plot(self, plot_name, us):
+        np_us = us.detach().numpy()
+        plt.clf()
+        for j in range(us.shape[1]):
+            plt.plot(np_us[:, j], label='{} u_{}'.format(self.log_name,  j))
+        plt.legend(loc="upper right")
+        plt.savefig("{}{}_{}.png".format(self.log_dir, self.log_name, plot_name))
+
     def train_energy(self, M, init_u, H0, Hs, psi0, dt):
         """Optimize the pulse to minimize the energy <psi(1)|M|psi(1)>
         Args:
@@ -62,16 +74,20 @@ class Grape(object):
             us: optimized pulses.
         """
         lr = 2e-2
-        n_epoch = 200
-        w_l2 = 0
-        Hs = [torch.tensor(c_to_r_mat(-1j * dt * H)) for H in Hs]
-        H0 = torch.tensor(c_to_r_mat(-1j * dt * H0)) 
+        n_epoch = 100
+        w_l2 = 1e-3
+        Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
+        H0 = torch.tensor(self.c_to_r_mat(-1j * dt * H0)) 
         us = torch.tensor(init_u, requires_grad=True)
         optimizer = torch.optim.Adam([us], lr=lr)
         initial_states = torch.tensor(psi0).double().unsqueeze(-1)
         M = torch.from_numpy(M)
 
-        for epoch in range(n_epoch):
+        self.losses_energy = []
+
+        for epoch in range(n_epoch + 1):
+            if epoch % 20 == 0:
+                self.save_plot(epoch, us)
             v = self.forward_simulate(us, H0, Hs, initial_states)
             loss_energy = v.transpose(1, 0).matmul(M).matmul(v)
             loss_l2 = torch.sqrt((us**2).mean())
@@ -79,11 +95,15 @@ class Grape(object):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
             print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
                 epoch, 
                 float(loss.detach().numpy()), 
                 float(loss_energy.detach().numpy()))
             )
+            self.losses_energy.append(float(loss_energy.detach().numpy()))
+
+
         return us
 
     def forward_simulate(self, us, H0, Hs, initial_states):
@@ -175,7 +195,7 @@ class Grape(object):
     @staticmethod
     def random_initialize_u(n_step, n_Hs):
         initial_mean = 0
-        initial_stddev = (1. / np.sqrt(n_step))
+        initial_stddev = 1e-3 # (1. / np.sqrt(n_step))
         u = np.random.normal(initial_mean, initial_stddev, [n_step ,n_Hs])
         return u
 
@@ -210,32 +230,80 @@ class Grape(object):
         init_u = self.random_initialize_u(n_step, len(Hs))
         final_u = self.train_fidelity(init_u, H0, Hs, initial_states, target_states, dt)
 
-    def demo_energy(self):
+
+    def demo_energy_qubit1(self):
         """demo of optimizing an energy <psi(1)|M|psi(1)>.
         """
         qubit_state_num = 2
-        qubit_num = 1
-        dt = 0.01
-        n_step = 100
+        qubit_num = 2
+        dt = 1./self.n_step
         M = np.array([[1, 3 + 1.j], [3 - 1.j, 2]])
+        # M = np.kron(np.array([[1, 3 + 1.j], [3 - 1.j, 2]]),
+        #             np.eye(2))
         M = self.c_to_r_mat(M)
 
-        Q_x = np.diag(np.sqrt(np.arange(1, qubit_state_num)), 1) \
-                + np.diag(np.sqrt(np.arange(1, qubit_state_num)), -1)
-        Q_y = (0+1j) *(np.diag(np.sqrt(np.arange(1, qubit_state_num)), 1) \
-                - np.diag(np.sqrt(np.arange(1, qubit_state_num)), -1))
-        Q_z = np.diag(np.arange(0, qubit_state_num))
-        H0 = np.eye(qubit_state_num)
-        Hs = [Q_x]
+        I = np.array([[1, 0], 
+                    [0, 1]])
+        X = np.array([[0, 1], 
+                    [1, 0]])
+        Y = (0+1j) * np.array([[0, -1], 
+                            [1, 0]])
+        Z = np.array([[1, 0], 
+                    [0, -1]])
+        H0 = I
+        Hs = [X, Z]
 
         g = np.array([1,0])
         e = np.array([0,1])
+
         psi0 = self.c_to_r_vec(g)
 
-        init_u = self.random_initialize_u(n_step, len(Hs))
+        init_u = self.random_initialize_u(self.n_step, len(Hs))
+        final_u = self.train_energy(M, init_u, H0, Hs, psi0, dt)
+
+    def demo_energy_qubit2(self):
+        """demo of optimizing an energy <psi(1)|M|psi(1)>.
+        """
+        qubit_state_num = 2
+        qubit_num = 2
+        dt = 1./self.n_step
+        M = np.kron(np.array([[1, 3 + 1.j], [3 - 1.j, 2]]),
+                    np.eye(2))
+        M = self.c_to_r_mat(M)
+
+        I = np.array([[1, 0], 
+                    [0, 1]])
+        X = np.array([[0, 1], 
+                    [1, 0]])
+        Y = (0+1j) * np.array([[0, -1], 
+                            [1, 0]])
+        Z = np.array([[1, 0], 
+                    [0, -1]])
+
+        XX = np.kron(X, X)
+        IZ = np.kron(I, Z)
+        ZI = np.kron(Z, I)
+        ZZ = np.kron(Z, Z)
+
+        H0 = ZZ
+        Hs = [XX, IZ]
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+
+        ee = np.kron(e, e)
+        gg = np.kron(g, g)
+
+        # print(np.kron(e, e))
+        # print(np.kron(g, g))
+        # exit()
+        psi0 = self.c_to_r_vec(gg)
+
+        init_u = self.random_initialize_u(self.n_step, len(Hs))
         final_u = self.train_energy(M, init_u, H0, Hs, psi0, dt)
 
 if __name__ == '__main__':
     grape = Grape(taylor_terms=20)
-    grape.demo_fidelity()
-    # grape.demo_energy()
+    # grape.demo_fidelity()
+    grape.demo_energy_qubit1()
+    # grape.demo_energy_qubit2()
