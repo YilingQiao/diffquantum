@@ -1,6 +1,15 @@
 
 # Differentiable Analog Quantum Computing for Learning and Control
 This project can run on python3.8
+
+## TODO
+- [x] GRAPE energy minimization and fidelity 
+- [x] Ours (Fourier) energy minimization - Control
+- [ ] Ours (Fourier) fidelity - Control
+- [ ] Parameter Shift
+- [ ] Ours (Parameter Shift) - Learning
+- [ ] Ours numerical integration
+
 ## Install
 ```bash
 git clone git@github.com:YilingQiao/diffquantum.git
