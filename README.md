@@ -18,11 +18,15 @@ cd diffquantum
 pip install -r requirements.txt
 ```
 ## Demos
-1. Compare wit GRAPE on energy minimization. 
+1. Compare with GRAPE on energy minimization. 
 ```bash
-python plot_grape_ours.py
+python plot_energy.py
 ```
-2. Compare wit QAOA on max-cut. 
+2. Compare with QAOA on max-cut. 
 ```bash
-python plot_qaoa_ours.py
+python plot_qaoa.py
+```
+3. Compare with GRAPE on quantum control. 
+```bash
+python plot_control.py
 ```
