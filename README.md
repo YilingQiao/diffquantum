@@ -5,9 +5,10 @@ This project can run on python3.8
 ## TODO
 - [x] GRAPE energy minimization and fidelity 
 - [x] Ours (Fourier) energy minimization - Control
-- [ ] Ours (Fourier) fidelity - Control
-- [ ] Parameter Shift
-- [ ] Ours (Parameter Shift) - Learning
+- [x] Ours (Legendre) energy minimization - Control
+- [x] Comparison with QAOA
+- [ ] Fidelity loss
+- [ ] Comparison with parameter shift - learning
 - [ ] Ours numerical integration
 
 ## Install
@@ -17,15 +18,11 @@ cd diffquantum
 pip install -r requirements.txt
 ```
 ## Demos
-1. Run GRAPE using gradients computed by torch.
+1. Compare wit GRAPE on energy minimization. 
 ```bash
-python grape.py
+python plot_grape_ours.py
 ```
-2. Compare the forward simulation results of my pulse-based simulation with that of qutip.
+2. Compare wit QAOA on max-cut. 
 ```bash
-python  compare_our_grape_with_qutip.py
-```
-3. Use our method to optimize Fourier coefficient. You can compare the energy with the results in 1, which should be the same.
-```bash
-python  ours_spectral.py
+python plot_qaoa_ours.py
 ```

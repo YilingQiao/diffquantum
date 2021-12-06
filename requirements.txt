@@ -1,2 +1,3 @@
 qutip
+pennylane
 torch

@@ -10,12 +10,13 @@ class OurSpectral(object):
     Args:
         n_basis: number of Fourier basis.
     """
-    def __init__(self, n_basis=5, basis='Fourier', n_epoch=200):
+    def __init__(self, n_basis=5, basis='Fourier', n_epoch=200, n_step=100):
         self.n_basis = n_basis
         self.log_dir = "./logs/"
         self.log_name = basis
         self.basis = basis
         self.n_epoch = n_epoch
+        self.n_step = n_step
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
 
@@ -98,7 +99,7 @@ class OurSpectral(object):
         plt.legend(loc="upper right")
         plt.savefig("{}{}_{}.png".format(self.log_dir, self.log_name, plot_name))
 
-    def train_energy(self, M, H0, Hs, initial_state, n_step):
+    def train_energy(self, M, H0, Hs, initial_state):
         """Train the sepctral coefficients to minimize energy minimization.
         Args:
             M: A Hermitian matrix.
@@ -109,16 +110,15 @@ class OurSpectral(object):
         Returns:
             spectral_coeff: sepctral coefficients.
         """
-        self.n_step = n_step
         self.n_Hs = len(Hs)
-        # coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
-        coeff = np.ones([self.n_Hs ,self.n_basis])
+        coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
+        # coeff = np.ones([self.n_Hs ,self.n_basis])
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
 
-        lr = 2e-2
+        lr = 1e-1
         w_l2 = 0
         I = qp.qeye(2)
-        ts = np.linspace(0, 1, n_step) 
+        ts = np.linspace(0, 1, self.n_step) 
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
 
         self.losses_energy = []
@@ -148,8 +148,22 @@ class OurSpectral(object):
                 loss_energy.real
             ))
             self.losses_energy.append(loss_energy.real)
+            self.final_state = final_state
 
         return self.spectral_coeff
+
+    @staticmethod
+    def find_state(final_state):
+        data = final_state.data
+        prob = []
+        for i in range(data.shape[0]):
+            d = final_state[i]
+            d = d.real**2 + d.imag**2
+            prob.append(d)
+        prob = np.array(prob)
+        prob = np.reshape(prob, [-1])
+        d = np.argmax(prob)
+        return d, prob
 
     def demo_energy_qubit2(self):
         I = np.array([[1, 0], 
@@ -197,7 +211,6 @@ class OurSpectral(object):
         gg, ee = qp.Qobj(gg), qp.Qobj(ee)
 
         psi0 = gg
-        n_step = 100
         # M = np.kron(np.array([[1, 3 + 1.j], [3 - 1.j, 2]]),
         #             np.eye(2))
         # M = qp.Qobj(M)
@@ -205,7 +218,7 @@ class OurSpectral(object):
         M = 0.5*XX + 0.2*YY + ZZ + IZ
         M = qp.Qobj(M)
 
-        self.train_energy(M, H0, Hs, psi0, n_step)
+        self.train_energy(M, H0, Hs, psi0)
 
     def demo_energy_qubit1(self):
         I = np.array([[1, 0], 
@@ -234,14 +247,80 @@ class OurSpectral(object):
         gg, ee = qp.Qobj(gg), qp.Qobj(ee)
 
         psi0 = qp.Qobj(g) 
-        n_step = 100
         M = np.array([[1, 3 + 1.j], [3 - 1.j, 2]])
         M = qp.Qobj(M)
-        self.train_energy(M, H0, Hs, psi0, n_step)
+        self.train_energy(M, H0, Hs, psi0)
+
+    def demo_qaoa_max_cut4(self):
+        n_qubit = 4
+        graph = [[0, 1], [0, 3], [1, 2], [2, 3]]
+        superposition = np.array([0] * 2**n_qubit)
+        for i in range(2**n_qubit):
+            z = np.array([0] * 2**n_qubit)
+            z[i] = 1
+            superposition += z
+        superposition = superposition / np.sqrt(2.0**n_qubit)
+
+        Xs = []
+        I = np.array(
+            [[1, 0], 
+            [0, 1]])
+        X = np.array(
+            [[0, 1], 
+            [1, 0]])
+        Z = np.array(
+            [[1, 0], 
+            [0, -1]])
+
+        II = I
+        for i in range(n_qubit - 1):
+            II = np.kron(II, I)
+
+        OO = II * 0.0
+
+        H0 = OO
+        H1 = OO
+        H_cost = OO
+        for i in range(n_qubit):
+            if i == 0:
+                curr = X
+            else:
+                curr = I
+            for j in range(1, n_qubit):
+                if j == i:
+                    curr = np.kron(curr, X)
+                else:
+                    curr = np.kron(curr, I)
+            H1 = H1 + curr
+
+        for e in graph:
+            if 0 in e:
+                curr = Z
+            else:
+                curr = I
+            for i in range(1, n_qubit):
+                if i in e:
+                    curr = np.kron(curr, Z)
+                else:
+                    curr = np.kron(curr, I)
+            H_cost += II - curr
+        H_cost = - H_cost * 0.5
+
+        H_cost = qp.Qobj(H_cost)
+        H0 = qp.Qobj(H0)
+        H1 = qp.Qobj(H1)
+        superposition = qp.Qobj(superposition)
+        self.train_energy(H_cost, H0, [H1], superposition)
+
+        state, prob = self.find_state(self.final_state)
+        print("cut result is ", bin(state)[2:])
+        return state, prob
+
 
 if __name__ == '__main__':
-    ours_spectral = OurSpectral(basis='Legendre')
+    ours_spectral = OurSpectral(basis='Legendre', n_basis=10)
+    ours_spectral = ours_spectral.demo_qaoa_max_cut4()
     # ours_spectral.demo_energy_qubit1()
-    ours_spectral.demo_energy_qubit2()
+    # ours_spectral.demo_energy_qubit2()
     # ours_spectral.demo_energy()
 
