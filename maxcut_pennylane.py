@@ -76,11 +76,9 @@ def circuit(gammas, betas, edge=None, n_layers=1):
         return qml.sample()
     # during the optimization phase we are evaluating a term
     # in the objective using expval
-    # a = qml.Hermitian(pauli_z_2, wires=edge)
-    # b = qml.expval(a)
-    # print("a ", a)
-    # print("b ", b)
-    return qml.expval(qml.Hermitian(pauli_z_2, wires=edge))
+    a = qml.Hermitian(pauli_z_2, wires=edge)
+    b = qml.expval(qml.Hermitian(pauli_z_2, wires=edge))
+    return b#qml.expval(qml.Hermitian(pauli_z_2, wires=edge))
 
 
 ##############################################################################
@@ -111,6 +109,7 @@ def qaoa_maxcut(steps=10, n_layers=1):
         for edge in graph:
             # objective for the MaxCut problem
             neg_obj -= 0.5 * (1 - circuit(gammas, betas, edge=edge, n_layers=n_layers))
+        print("{.4f}".format(neg_obj.data), "--")
         return neg_obj
 
     # initialize optimizer: Adagrad works well empirically

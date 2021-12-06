@@ -27,8 +27,8 @@ class Grape(object):
         Returns:
             us: optimized pulses.
         """
-        lr = 3e-3
-        w_l2 = 1
+        lr = 2e-2
+        w_l2 = 1e-3
         max_amplitude = torch.from_numpy(4 * np.ones(len(Hs)))
         Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
         H0 = torch.tensor(self.c_to_r_mat(-1j * dt * H0)) 
@@ -37,6 +37,7 @@ class Grape(object):
         initial_states = torch.tensor(np.array(initial_states)).double().transpose(1, 0)
         target_states = torch.tensor(np.array(target_states)).double().transpose(1, 0)
 
+        self.losses_energy = []
         for epoch in range(self.n_epoch):
             modifled_us = torch.sin(us) * max_amplitude
             final_states = self.forward_simulate(modifled_us, H0, Hs, initial_states)
@@ -51,6 +52,7 @@ class Grape(object):
                 float(loss.detach().numpy()), 
                 float(loss_fidelity.detach().numpy()))
             )
+            self.losses_energy.append(float(loss_fidelity.detach().numpy()))
         return us
 
     def save_plot(self, plot_name, us):
@@ -329,6 +331,6 @@ class Grape(object):
 
 if __name__ == '__main__':
     grape = Grape(taylor_terms=20)
-    # grape.demo_fidelity()
+    grape.demo_fidelity()
     # grape.demo_energy_qubit1()
-    grape.demo_energy_qubit2()
+    # grape.demo_energy_qubit2()
