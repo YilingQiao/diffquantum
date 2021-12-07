@@ -433,6 +433,7 @@ class Grape(object):
         final_u = self.train_energy(M, init_u, H0, Hs, psi0, dt)
 
     def demo_learning(self):
+        np.random.seed(0)
         n_qubit = 3
         dt = 1./self.n_step
         n_training_size = 8
@@ -445,7 +446,6 @@ class Grape(object):
         Z = np.array([[1.0, 0], 
                     [0, -1.0]])
 
-
         curr = Grape.multi_kron(*[I for j in range(n_qubit)])   
         X0 = Grape.inst(curr, X, n_qubit, 0)
         X1 = Grape.inst(curr, X, n_qubit, 1)
@@ -454,23 +454,32 @@ class Grape(object):
         Z1 = Grape.inst(curr, Z, n_qubit, 1)
         Z2 = Grape.inst(curr, Z, n_qubit, 2)
 
+        ZZI = np.kron(np.kron(Z, Z), I)
+        ZIZ = np.kron(np.kron(Z, I), Z)
+        IZZ = np.kron(np.kron(I, Z), Z)
 
-        H0 = X0 + X1 + X2 + Z0 + Z1 + Z2
-        Hs = [X0, Z0, X0, X1, Z1, X1, X2, Z2, X2]
+        YYI = np.kron(np.kron(Y, Y), I)
+        YIY = np.kron(np.kron(Y, I), Y)
+        IYY = np.kron(np.kron(I, Y), Y)
+
+        H0 = ZZI + ZIZ + IZZ + X0 + X1 + X2
+        # H1 = np.kron(np.kron(Z, Z), I)
+        Hs = [Z0, Z1, Z2, X0, X1, X2]
         M = Z0
         M = self.c_to_r_mat(M)
 
-
         x = np.linspace(-0.95, 0.95, n_training_size)
         x = x[::-1]
-        y = x**2
+        y = np.abs(x)
+        y = x**2 
+        y = y + np.random.normal(0, 0.1, n_training_size)
         print(x)
         print(y)
         init_u = self.random_initialize_u(self.n_step, len(Hs))
         self.train_learning(n_qubit, M, init_u, x, y, H0, Hs, dt)
 
 if __name__ == '__main__':
-    grape = Grape(taylor_terms=20)
+    grape = Grape(taylor_terms=20, n_step=9)
     grape.demo_learning()
     # grape.demo_energy_qubit1()
     # grape.demo_energy_qubit2()

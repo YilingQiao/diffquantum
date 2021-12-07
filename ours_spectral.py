@@ -266,20 +266,59 @@ class OurSpectral(object):
         return self.spectral_coeff
 
     @staticmethod
-    def encoding_x(x):
-        psi0 = qp.Qobj(np.array([1,0]))
+    def multi_kron(*args):
+        ret = np.array([[1.0]])
+        for q in args:
+            ret = np.kron(ret, q)
+        return ret
+
+    @staticmethod
+    def multi_dot(*args):
+        for i, q in enumerate(args):
+            if i == 0:
+                ret = q
+            else:
+                ret = np.dot(ret, q)
+        return ret
+
+    @staticmethod
+    def inst(curr, gate, n_qubit, idx=None):
+        I = np.eye(2)
+        if idx is not None:
+            curr = OurSpectral.multi_dot(OurSpectral.multi_kron(
+                *[gate if j == idx else I for j in range(n_qubit)]), curr)
+        else:
+            curr = OurSpectral.multi_dot(gate, curr)
+        return curr
+
+    @staticmethod
+    def encoding_x(x, n_qubit):
+        # g = np.array([1., 1.]) / np.sqrt(2.) 
+        # g = np.array([1., 0.]) 
+        I = np.eye(2)
+        zero = np.array([[1.0],
+                 [0.0]])
         RX = lambda theta: np.array([[np.cos(theta/2.0),-1j*np.sin(theta/2.0)],
                              [-1j*np.sin(theta/2.0),np.cos(theta/2.0)]])
         RY = lambda theta: np.array([[np.cos(theta/2.0),-np.sin(theta/2.0)],
                                      [np.sin(theta/2.0),np.cos(theta/2.0)]])
         RZ = lambda theta: np.array([[np.exp(-1j*theta/2.0),0],
                                      [0,np.exp(1j*theta/2.0)]])
-        psi0 = np.array([1,0])
-        psi0 = RZ(np.arccos(x**2)).dot(RY(np.arcsin(x))).dot(psi0)
+
+        psi0 = OurSpectral.multi_kron(*[zero for j in range(n_qubit)]) 
+
+        curr = OurSpectral.multi_kron(*[I for j in range(n_qubit)])   
+        for j in range(n_qubit):
+            curr = OurSpectral.inst(curr, RY(np.arcsin(x)), n_qubit, j)
+            curr = OurSpectral.inst(curr, RZ(np.arccos(x**2)), n_qubit, j)
+
+ 
+        psi0 = np.matmul(curr, psi0)
         psi0 = qp.Qobj(psi0)
         return psi0
 
-    def train_learning(self, H0, Hs, X, Y):
+
+    def train_learning(self, M, H0, Hs, X, Y, n_qubit):
         """Train the sepctral coefficients to minimize energy minimization.
         Args:
             H0: The drift Hamiltonian.
@@ -290,33 +329,27 @@ class OurSpectral(object):
             spectral_coeff: sepctral coefficients.
         """
         self.n_Hs = len(Hs)
-        # coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
-        coeff = np.ones([self.n_Hs ,self.n_basis])
+        coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
+        # coeff = np.ones([self.n_Hs ,self.n_basis])
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
 
-        lr = 2e-1
+        lr = 2e-2
         w_l2 = 0
         ts = np.linspace(0, 1, self.n_step) 
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
         
-        I = qp.qeye(2)
-        Z = np.array([[1, 0], 
-            [0, -1]])
-        Z = qp.Qobj(Z)
-        M = Z
-
         self.losses_energy = []
         for epoch in range(self.n_epoch + 1):
             if epoch % 20 == 0:
                 self.save_plot(epoch)
             batch_losses = []
 
+            # permutation = np.random.permutation(Y.shape[0])
             for k in range(Y.shape[0]):
-
                 H = [H0]
                 for i in range(self.n_Hs):
                     H.append([Hs[i], self.generate_u(i)])
-                psi0 = self.encoding_x(X[k])
+                psi0 = self.encoding_x(X[k], n_qubit)
                 result = qp.mesolve(H, psi0, ts)
                 final_state = result.states[-1]
                 predict = M.matrix_element(final_state, final_state).real
@@ -473,7 +506,9 @@ class OurSpectral(object):
         self.train_fidelity(H0, Hs, initial_states, target_states)
 
     def demo_learning(self):
+        np.random.seed(0)
         n_training_size = 8
+        n_qubit = 3
         I = np.array([[1, 0], 
                     [0, 1]])
         X = np.array([[0, 1], 
@@ -483,20 +518,45 @@ class OurSpectral(object):
         Z = np.array([[1, 0], 
                     [0, -1]])
 
+        curr = OurSpectral.multi_kron(*[I for j in range(n_qubit)])
+        X0 = qp.Qobj(OurSpectral.inst(curr, X, n_qubit, 0))
+        X1 = qp.Qobj(OurSpectral.inst(curr, X, n_qubit, 1))
+        X2 = qp.Qobj(OurSpectral.inst(curr, X, n_qubit, 2))
+        Z0 = qp.Qobj(OurSpectral.inst(curr, Z, n_qubit, 0))
+        Z1 = qp.Qobj(OurSpectral.inst(curr, Z, n_qubit, 1))
+        Z2 = qp.Qobj(OurSpectral.inst(curr, Z, n_qubit, 2))
+
+        ZZI = np.kron(np.kron(Z, Z), I)
+        ZIZ = np.kron(np.kron(Z, I), Z)
+        IZZ = np.kron(np.kron(I, Z), Z)
+
+        YYI = np.kron(np.kron(Y, Y), I)
+        YIY = np.kron(np.kron(Y, I), Y)
+        IYY = np.kron(np.kron(I, Y), Y)
+        H0 = ZZI + ZIZ + IZZ + X0 + X1 + X2
+        # H1 = YYI + YIY + IYY
+        # H1 = np.kron(np.kron(Z, Z), I) + np.kron(np.kron(Z, I), Z) + np.kron(np.kron(I, Z), Z)
+        H2 = X0 + X1 + X2
+
         I = qp.Qobj(I)
         X = qp.Qobj(X)
         Y = qp.Qobj(Y)
         Z = qp.Qobj(Z)
 
-        H0 = X + Z
-        Hs = [X, Z, Y]
+        H0 = qp.Qobj(H0)
+        # Hs = [qp.Qobj(H1), qp.Qobj(H2)]
+        # Hs = [ZZI, ZIZ, IZZ, X0, X1, X2, H1]
+        Hs = [X0, X1, X2, Z0, Z1, Z2]
+        Hs = [qp.Qobj(i) for i in Hs]
 
         x = np.linspace(-0.95, 0.95, n_training_size)
-        y = x**2
-        print(x)
-        print(y)
+        x = x[::-1]
+        y = np.sin(x * np.pi)
+        # y = x**2 
+        y = y + np.random.normal(0, 0.1, n_training_size)
+        M = qp.Qobj(Z0)
 
-        self.train_learning(H0, Hs, x, y)
+        self.train_learning(M, H0, Hs, x, y, n_qubit)
 
     def demo_qaoa_max_cut4(self):
         n_qubit = 4
@@ -565,10 +625,10 @@ class OurSpectral(object):
 
 
 if __name__ == '__main__':
-    ours_spectral = OurSpectral(basis='Legendre', n_basis=3)
-    # ours_spectral = ours_spectral.demo_learning()
+    ours_spectral = OurSpectral(basis='Legendre', n_basis=6)
+    ours_spectral = ours_spectral.demo_learning()
     # ours_spectral = ours_spectral.demo_qaoa_max_cut4()
-    ours_spectral.demo_fidelity()
+    # ours_spectral.demo_fidelity()
     # ours_spectral.demo_energy_qubit2()
     # ours_spectral.demo_energy()
 
