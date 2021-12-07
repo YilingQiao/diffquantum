@@ -30,3 +30,7 @@ python plot_qaoa.py
 ```bash
 python plot_control.py
 ```
+3. Compare with Quantum Circuit Learning on function fitting. 
+```bash
+python plot_learning.py
+```
