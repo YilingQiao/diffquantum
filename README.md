@@ -7,8 +7,8 @@ This project can run on python3.8
 - [x] Ours (Fourier) energy minimization - Control
 - [x] Ours (Legendre) energy minimization - Control
 - [x] Comparison with QAOA
-- [ ] Fidelity loss
-- [ ] Comparison with parameter shift - learning
+- [x] Fidelity loss
+- [x] Comparison with parameter shift - learning
 - [ ] Ours numerical integration
 
 ## Install
