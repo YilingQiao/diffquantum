@@ -551,8 +551,8 @@ class OurSpectral(object):
 
         x = np.linspace(-0.95, 0.95, n_training_size)
         x = x[::-1]
-        y = np.sin(x * np.pi)
-        # y = x**2 
+        # y = np.sin(x * np.pi)
+        y = x**2 
         y = y + np.random.normal(0, 0.1, n_training_size)
         M = qp.Qobj(Z0)
 
