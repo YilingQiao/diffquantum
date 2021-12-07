@@ -92,7 +92,7 @@ class OurSpectral(object):
         plt.hist(grads_coeffs[:,0])
         plt.show()
 
-    def compute_energy_grad_MC(self, M, H, initial_state):
+    def compute_energy_grad_MC(self, M, H, initial_state, coeff=1.0):
         """Compute the gradient of engergy function <psi(1)|M|psi(1)>
         Args:
             M: A Hermitian matrix.
@@ -125,7 +125,7 @@ class OurSpectral(object):
             ket_m = result.states[-1]
             ps_m = M.matrix_element(ket_m, ket_m)
 
-            ps = (0.5 / r * (ps_m - ps_p)).real
+            ps = coeff * (0.5 / r * (ps_m - ps_p)).real
 
             n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis  
             for j in range(n):
@@ -166,7 +166,7 @@ class OurSpectral(object):
         # coeff = np.ones([self.n_Hs ,self.n_basis])
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
 
-        lr = 1e-1
+        lr = 2e-2
         w_l2 = 0
         I = qp.qeye(2)
         ts = np.linspace(0, 1, self.n_step) 
@@ -202,49 +202,84 @@ class OurSpectral(object):
             self.final_state = final_state
         return self.spectral_coeff
 
-
-    def compute_fidelity_grad_MC(self, I, H, initial_state, target_state, loss_fidelity_a):
-        """Compute the gradient of engergy function <psi(1)|M|psi(1)>
+    def train_fidelity(self, H0, Hs, initial_states, target_states):
+        """Train the sepctral coefficients to minimize energy minimization.
         Args:
-            M: A Hermitian matrix.
-            H: Hamiltonians [H0, [H_i, u_i(t)], ...].
-            initial_state: initial_state.
+            H0: The drift Hamiltonian.
+            Hs: Controlable Hamiltonians.
+            initial_states: initial states.
+            target_states: target states.
         Returns:
-            grad_coeff: gradients of the spectral coefficients.
+            spectral_coeff: sepctral coefficients.
         """
-        grad_coeff = np.zeros(self.spectral_coeff.shape)
-        s = np.random.uniform()
-        t0s = np.linspace(0, s, self.n_step)
+        self.n_Hs = len(Hs)
+        coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
+        # coeff = np.ones([self.n_Hs ,self.n_basis])
+        self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
 
-        result = qp.mesolve(H, initial_state, t0s)
-        psi = result.states[-1]
-        phi = target_state
+        lr = 2e-2
+        w_l2 = 0
+        ts = np.linspace(0, 1, self.n_step) 
+        optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
+        # I = qp.qeye(initial_states[0].shape[0])
 
-        
-        ts1 = np.linspace(s, 1, self.n_step)
-        r = 1
+        self.losses_energy = []
+        for epoch in range(self.n_epoch + 1):
+            if epoch % 20 == 0:
+                self.save_plot(epoch)
 
-        for i in range(self.n_Hs):
-            result = qp.mesolve(H, H[i+1][0] * psi, ts1)
-            ket_p = result.states[-1]
-            term1 = I.matrix_element(ket_p, phi) * np.conjugate(loss_fidelity_a)
-            term2 = I.matrix_element(phi, ket_p) * loss_fidelity_a
-            
-            ps = (term1 + term2).real
+            batch_losses = []
+            for i in range(len(initial_states)):
+                H = [H0]
+                for i in range(self.n_Hs):
+                    H.append([Hs[i], self.generate_u(i)])
+                psi0 = initial_states[i]
+                psi1 = target_states[i]
+                M = psi1 * psi1.trans() 
+                # print(psi1.trans())
+                # print(M)
+                # exit()
+                result = qp.mesolve(H, psi0, ts)
+                final_state = result.states[-1]
 
-            n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis  
-            for j in range(n):
-                if self.basis == 'poly':
-                    grad_coeff[i][j] = (s-0.5)**j * ps
-                elif self.basis == 'Legendre':
-                    pj = legendre(j)
-                    grad_coeff[i][j] = pj(2 * s - 1) * ps
-                elif self.basis == 'Fourier':
-                    grad_coeff[i][j] = ps * (np.cos(2 * np.pi * j * s) \
-                        + np.sin(2 * np.pi * j * s) )
-        return torch.from_numpy(grad_coeff)
+                loss_fidelity = 1 - M.matrix_element(final_state, final_state)
+                # loss_energy = M.matrix_element(final_state, final_state)
+                loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
+                    [i**2 for i in range(self.n_basis)])).mean() * w_l2
+                loss = loss_fidelity + loss_l2
+                optimizer.zero_grad()
+                loss_l2.backward()
+                grad_coeff = self.compute_energy_grad_MC(M, H, psi0, coeff=-1.0)
 
-    def train_fidelity(self,H0, Hs, initial_states, target_states):
+                self.spectral_coeff.grad = grad_coeff
+                optimizer.step()
+
+                batch_losses.append(loss_fidelity.real)
+
+            batch_losses = np.array(batch_losses).mean()
+            print("epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
+                epoch, 
+                batch_losses, 
+                batch_losses
+            ))
+            self.losses_energy.append(batch_losses)
+        return self.spectral_coeff
+
+    @staticmethod
+    def encoding_x(x):
+        psi0 = qp.Qobj(np.array([1,0]))
+        RX = lambda theta: np.array([[np.cos(theta/2.0),-1j*np.sin(theta/2.0)],
+                             [-1j*np.sin(theta/2.0),np.cos(theta/2.0)]])
+        RY = lambda theta: np.array([[np.cos(theta/2.0),-np.sin(theta/2.0)],
+                                     [np.sin(theta/2.0),np.cos(theta/2.0)]])
+        RZ = lambda theta: np.array([[np.exp(-1j*theta/2.0),0],
+                                     [0,np.exp(1j*theta/2.0)]])
+        psi0 = np.array([1,0])
+        psi0 = RZ(np.arccos(x**2)).dot(RY(np.arcsin(x))).dot(psi0)
+        psi0 = qp.Qobj(psi0)
+        return psi0
+
+    def train_learning(self, H0, Hs, X, Y):
         """Train the sepctral coefficients to minimize energy minimization.
         Args:
             H0: The drift Hamiltonian.
@@ -259,36 +294,43 @@ class OurSpectral(object):
         coeff = np.ones([self.n_Hs ,self.n_basis])
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
 
-        lr = 2e-2
+        lr = 2e-1
         w_l2 = 0
         ts = np.linspace(0, 1, self.n_step) 
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
-        I = qp.qeye(initial_states[0].shape[0])
+        
+        I = qp.qeye(2)
+        Z = np.array([[1, 0], 
+            [0, -1]])
+        Z = qp.Qobj(Z)
+        M = Z
 
         self.losses_energy = []
         for epoch in range(self.n_epoch + 1):
             if epoch % 20 == 0:
                 self.save_plot(epoch)
-            H = [H0]
-            for i in range(self.n_Hs):
-                H.append([Hs[i], self.generate_u(i)])
-
             batch_losses = []
-            for i in range(len(initial_states)):
-                psi0 = initial_states[i]
-                psi1 = target_states[i]
+
+            for k in range(Y.shape[0]):
+
+                H = [H0]
+                for i in range(self.n_Hs):
+                    H.append([Hs[i], self.generate_u(i)])
+                psi0 = self.encoding_x(X[k])
                 result = qp.mesolve(H, psi0, ts)
                 final_state = result.states[-1]
+                predict = M.matrix_element(final_state, final_state).real
 
-                loss_fidelity_a = I.matrix_element(psi1, final_state)
-                loss_fidelity = 1 - loss_fidelity_a * np.conjugate(loss_fidelity_a)
+                loss_fidelity = (Y[k] - predict)**2
                 # loss_energy = M.matrix_element(final_state, final_state)
+
                 loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
                     [i**2 for i in range(self.n_basis)])).mean() * w_l2
                 loss = loss_fidelity + loss_l2
                 optimizer.zero_grad()
                 loss_l2.backward()
-                grad_coeff = self.compute_fidelity_grad_MC(I, H, psi0, psi1, loss_fidelity_a)
+                coeff =   - 2 * (Y[k] - predict)
+                grad_coeff = self.compute_energy_grad_MC(M, H, psi0, coeff=coeff)
                 self.spectral_coeff.grad = grad_coeff
                 optimizer.step()
 
@@ -430,6 +472,32 @@ class OurSpectral(object):
         target_states = [e, g]
         self.train_fidelity(H0, Hs, initial_states, target_states)
 
+    def demo_learning(self):
+        n_training_size = 8
+        I = np.array([[1, 0], 
+                    [0, 1]])
+        X = np.array([[0, 1], 
+                    [1, 0]])
+        Y = (0+1j) * np.array([[0, -1], 
+                            [1, 0]])
+        Z = np.array([[1, 0], 
+                    [0, -1]])
+
+        I = qp.Qobj(I)
+        X = qp.Qobj(X)
+        Y = qp.Qobj(Y)
+        Z = qp.Qobj(Z)
+
+        H0 = X + Z
+        Hs = [X, Z, Y]
+
+        x = np.linspace(-0.95, 0.95, n_training_size)
+        y = x**2
+        print(x)
+        print(y)
+
+        self.train_learning(H0, Hs, x, y)
+
     def demo_qaoa_max_cut4(self):
         n_qubit = 4
         graph = [[0, 1], [0, 3], [1, 2], [2, 3]]
@@ -498,9 +566,9 @@ class OurSpectral(object):
 
 if __name__ == '__main__':
     ours_spectral = OurSpectral(basis='Legendre', n_basis=3)
-    ours_spectral = ours_spectral.demo_fidelity()
+    # ours_spectral = ours_spectral.demo_learning()
     # ours_spectral = ours_spectral.demo_qaoa_max_cut4()
-    # ours_spectral.demo_energy_qubit1()
+    ours_spectral.demo_fidelity()
     # ours_spectral.demo_energy_qubit2()
     # ours_spectral.demo_energy()
 

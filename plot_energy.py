@@ -20,9 +20,9 @@ ours_fourier.demo_energy_qubit2()
 loss_fourier = ours_fourier.losses_energy
 
 plt.clf()
-plt.plot(loss_grape, label='grape')
-plt.plot(loss_fourier, label='Fourier')
-plt.plot(loss_legendre, label='Legendre')
+plt.plot(np.array(loss_grape) + 2, label='grape')
+plt.plot(np.array(loss_fourier) + 2, label='Fourier')
+plt.plot(np.array(loss_legendre) + 2, label='Legendre')
 plt.legend(loc="upper right")
 plt.savefig("{}_{}.png".format(grape.log_dir, 'losses_energy'))
 plt.yscale('log')

@@ -89,7 +89,6 @@ class Grape(object):
         M = torch.from_numpy(M)
 
         self.losses_energy = []
-
         for epoch in range(self.n_epoch + 1):
             if epoch % 20 == 0:
                 self.save_plot(epoch, us)
@@ -108,8 +107,112 @@ class Grape(object):
                 float(loss_energy.detach().numpy()))
             )
             self.losses_energy.append(float(loss_energy.detach().numpy()))
+            
+        return us
 
+    @staticmethod
+    def multi_kron(*args):
+        ret = np.array([[1.0]])
+        for q in args:
+            ret = np.kron(ret, q)
+        return ret
 
+    @staticmethod
+    def multi_dot(*args):
+        for i, q in enumerate(args):
+            if i == 0:
+                ret = q
+            else:
+                ret = np.dot(ret, q)
+        return ret
+
+    @staticmethod
+    def inst(curr, gate, n_qubit, idx=None):
+        I = np.eye(2)
+        if idx is not None:
+            curr = Grape.multi_dot(Grape.multi_kron(
+                *[gate if j == idx else I for j in range(n_qubit)]), curr)
+        else:
+            curr = Grape.multi_dot(gate, curr)
+        return curr
+
+    @staticmethod
+    def encoding_x(x, n_qubit):
+        g = np.array([1,1]) / np.sqrt(2.) 
+        I = np.eye(2)
+        zero = np.array([[1.0],
+                 [0.0]])
+        RX = lambda theta: np.array([[np.cos(theta/2.0),-1j*np.sin(theta/2.0)],
+                             [-1j*np.sin(theta/2.0),np.cos(theta/2.0)]])
+        RY = lambda theta: np.array([[np.cos(theta/2.0),-np.sin(theta/2.0)],
+                                     [np.sin(theta/2.0),np.cos(theta/2.0)]])
+        RZ = lambda theta: np.array([[np.exp(-1j*theta/2.0),0],
+                                     [0,np.exp(1j*theta/2.0)]])
+
+        psi0 = Grape.multi_kron(*[zero for j in range(n_qubit)]) 
+
+        curr = Grape.multi_kron(*[I for j in range(n_qubit)])   
+        for j in range(n_qubit):
+            curr = Grape.inst(curr, RY(np.arcsin(x)), n_qubit, j)
+            curr = Grape.inst(curr, RZ(np.arccos(x**2)), n_qubit, j)
+
+ 
+        psi0 = np.matmul(curr, psi0)
+        psi0 = torch.tensor(Grape.c_to_r_vec(psi0))
+        return psi0.unsqueeze(-1)
+
+    def train_learning(self, n_qubit, M, init_u, X, Y, H0, Hs, dt):
+        """Optimize the pulse to minimize the energy <psi(1)|M|psi(1)>
+        Args:
+            M: a Hermitian matrix.
+            init_u: initial pulse.
+            H0: a Hermitian matrix.
+            Hs: a list of Hermitian matrics.
+            psi0: initial state.
+            dt: size of time step.
+        Returns:
+            us: optimized pulses.
+        """
+        lr = 2e-2
+        w_l2 = 1e-3
+        Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
+        # print(Hs)
+        # exit()
+        H0 = torch.tensor(self.c_to_r_mat(-1j * dt * H0)) 
+        us = torch.tensor(init_u, requires_grad=True)
+        optimizer = torch.optim.Adam([us], lr=lr)
+        M = torch.from_numpy(M)
+
+        self.losses_energy = []
+        for epoch in range(self.n_epoch + 1):
+            if epoch % 20 == 0:
+                self.save_plot(epoch, us)
+
+            batch_losses = []
+            permutation = np.random.permutation(X.shape[0])
+            for k in permutation:
+                psi0 = self.encoding_x(X[k], n_qubit) 
+                v = self.forward_simulate(us, H0, Hs, psi0)
+                pred = v.transpose(1, 0).matmul(M).matmul(v)
+
+                loss_energy = (pred - Y[k])**2
+                # print(float(pred.detach().numpy()), Y[k])
+
+                loss_l2 = torch.sqrt((us**2).mean())
+                loss = loss_energy + loss_l2 * w_l2
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                batch_losses.append(loss_energy.detach().numpy())
+
+            batch_losses = np.array(batch_losses).mean()
+            print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+                epoch, 
+                batch_losses, 
+                batch_losses)
+            )
+            self.losses_energy.append(batch_losses)
+            
         return us
 
     def forward_simulate(self, us, H0, Hs, initial_states):
@@ -329,8 +432,45 @@ class Grape(object):
         init_u = self.random_initialize_u(self.n_step, len(Hs))
         final_u = self.train_energy(M, init_u, H0, Hs, psi0, dt)
 
+    def demo_learning(self):
+        n_qubit = 3
+        dt = 1./self.n_step
+        n_training_size = 8
+        I = np.array([[1., 0], 
+                    [0, 1.]])
+        X = np.array([[0, 1], 
+                    [1, 0]])
+        Y = (0+1j) * np.array([[0, -1], 
+                            [1, 0]])
+        Z = np.array([[1.0, 0], 
+                    [0, -1.0]])
+
+
+        curr = Grape.multi_kron(*[I for j in range(n_qubit)])   
+        X0 = Grape.inst(curr, X, n_qubit, 0)
+        X1 = Grape.inst(curr, X, n_qubit, 1)
+        X2 = Grape.inst(curr, X, n_qubit, 2)
+        Z0 = Grape.inst(curr, Z, n_qubit, 0)
+        Z1 = Grape.inst(curr, Z, n_qubit, 1)
+        Z2 = Grape.inst(curr, Z, n_qubit, 2)
+
+
+        H0 = X0 + X1 + X2 + Z0 + Z1 + Z2
+        Hs = [X0, Z0, X0, X1, Z1, X1, X2, Z2, X2]
+        M = Z0
+        M = self.c_to_r_mat(M)
+
+
+        x = np.linspace(-0.95, 0.95, n_training_size)
+        x = x[::-1]
+        y = x**2
+        print(x)
+        print(y)
+        init_u = self.random_initialize_u(self.n_step, len(Hs))
+        self.train_learning(n_qubit, M, init_u, x, y, H0, Hs, dt)
+
 if __name__ == '__main__':
     grape = Grape(taylor_terms=20)
-    grape.demo_fidelity()
+    grape.demo_learning()
     # grape.demo_energy_qubit1()
     # grape.demo_energy_qubit2()
