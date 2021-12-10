@@ -53,7 +53,7 @@ class OurSpectral(object):
             phi = result.states[-1]
             
             ts1 = np.linspace(s, 1, self.n_step)
-            r = 1
+            r = 1 / 2
 
             for i in range(self.n_Hs):
                 d = initial_state.shape[0]
@@ -104,7 +104,7 @@ class OurSpectral(object):
         phi = result.states[-1]
         
         ts1 = np.linspace(s, 1, self.n_step)
-        r = 1
+        r = 1 / 2
 
         for i in range(self.n_Hs):
             d = initial_state.shape[0]
