@@ -34,3 +34,9 @@ python plot_control.py
 ```bash
 python plot_learning.py
 ```
+
+4. Compare with Finite Difference. 
+```bash
+python plot_FD_sanity_check.py
+python plot_FD_optimize.py
+```

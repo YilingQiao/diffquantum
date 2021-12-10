@@ -20,7 +20,7 @@ class OurSpectral(object):
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
 
-    def generate_u(self, i):
+    def generate_u(self, i, spectral_coeff):
         """Generate the function u(i) for H_i
         Args:
             i: index of the H_i.
@@ -28,7 +28,7 @@ class OurSpectral(object):
             _u: function u_i(t).
         """
         def _u(t, args):
-            coeff_i = self.spectral_coeff.detach().numpy()[i]
+            coeff_i = spectral_coeff[i]
             u = 0
             n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis
             for j in range(n):
@@ -42,12 +42,11 @@ class OurSpectral(object):
             return u
         return _u
 
-    def sample_multiple_times(self, M, H, initial_state, n_samples=100):
+    def sample_multiple_times(self, M, H, initial_state, n_samples=100, is_MC=True):
         grads_coeffs = []
-
         for ss in range(n_samples):
             grad_coeff = np.zeros(self.spectral_coeff.shape)
-            s = np.random.uniform()
+            s = np.random.uniform() if is_MC else (ss + 1) * 1.0 / (n_samples + 1)
             t0s = np.linspace(0, s, self.n_step)
             result = qp.mesolve(H, initial_state, t0s)
             phi = result.states[-1]
@@ -135,7 +134,7 @@ class OurSpectral(object):
 
     def save_plot(self, plot_name):
         ts = np.linspace(0, 1, self.n_step) 
-        fs = [self.generate_u(i) for i in range(self.n_Hs)]
+        fs = [self.generate_u(i, self.spectral_coeff.detach().numpy()) for i in range(self.n_Hs)]
         np_us = np.array([[f(x, None) for f in fs] for x in ts])
         plt.clf()
         for j in range(len(fs)):
@@ -172,7 +171,7 @@ class OurSpectral(object):
                 self.save_plot(epoch)
             H = [H0]
             for i in range(self.n_Hs):
-                H.append([Hs[i], self.generate_u(i)])
+                H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy())])
 
             result = qp.mesolve(H, initial_state, ts)
             final_state = result.states[-1]
@@ -184,6 +183,99 @@ class OurSpectral(object):
             optimizer.zero_grad()
             loss_l2.backward()
             grad_coeff = self.compute_energy_grad_MC(M, H, initial_state)
+            self.spectral_coeff.grad = grad_coeff
+            optimizer.step()
+
+            print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+                epoch, 
+                loss.real, 
+                loss_energy.real
+            ))
+            self.losses_energy.append(loss_energy.real)
+            self.final_state = final_state
+        return self.spectral_coeff
+
+
+    def compute_energy_grad_FD(self, M, H, initial_state, delta=1e-3, coeff=1.0):
+        """Compute the gradient of engergy function <psi(1)|M|psi(1)>
+        Args:
+            M: A Hermitian matrix.
+            H: Hamiltonians [H0, [H_i, u_i(t)], ...].
+            initial_state: initial_state.
+        Returns:
+            grad_coeff: gradients of the spectral coefficients.
+        """
+        coeff = self.spectral_coeff.detach().numpy()
+        grad_finite_diff = np.zeros([self.n_Hs ,self.n_basis])
+
+        ts = np.linspace(0, 1, self.n_step) 
+
+        def get_H(curr_coeff):
+            _H = [H[0]]
+            for _i in range(self.n_Hs):
+                _H.append([H[_i+1][0], self.generate_u(_i, curr_coeff)])
+            return _H
+
+        def run_forward_sim(new_coeff):
+            _H = get_H(new_coeff)
+            result = qp.mesolve(_H, initial_state, ts)
+            final_state = result.states[-1]
+            loss_energy = M.matrix_element(final_state, final_state)
+            return loss_energy.real
+
+        for i_Hs in range(self.n_Hs):
+            for i_basis in range(self.n_basis):
+                new_coeff_p = coeff.copy()
+                new_coeff_p[i_Hs][i_basis] = coeff[i_Hs][i_basis] + delta
+                E_p = run_forward_sim(new_coeff_p)
+                new_coeff_m = coeff.copy()
+                new_coeff_m[i_Hs][i_basis] = coeff[i_Hs][i_basis] - delta
+                E_m = run_forward_sim(new_coeff_m)
+                grad_finite_diff[i_Hs][i_basis] = (E_p - E_m) / delta / 2.0
+
+        return torch.from_numpy(grad_finite_diff)
+
+    def train_energy_FD(self, M, H0, Hs, initial_state, delta=1e-3):
+        """Train the sepctral coefficients to minimize energy minimization.
+        Args:
+            M: A Hermitian matrix.
+            H0: The drift Hamiltonian.
+            Hs: Controlable Hamiltonians.
+            initial_state: initial_state.
+            n_step: number of time steps.
+        Returns:
+            spectral_coeff: sepctral coefficients.
+        """
+        self.n_Hs = len(Hs)
+        coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
+        # coeff = np.ones([self.n_Hs ,self.n_basis])
+        self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
+
+        lr = 2e-2
+        w_l2 = 0
+        I = qp.qeye(2)
+        ts = np.linspace(0, 1, self.n_step) 
+        optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
+
+        self.losses_energy = []
+        for epoch in range(self.n_epoch + 1):
+            if epoch % 20 == 0:
+                self.save_plot(epoch)
+            H = [H0]
+            for i in range(self.n_Hs):
+                H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy())])
+
+            result = qp.mesolve(H, initial_state, ts)
+            final_state = result.states[-1]
+
+            loss_energy = M.matrix_element(final_state, final_state)
+            loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
+                [i**2 for i in range(self.n_basis)])).mean() * w_l2
+            loss = loss_energy + loss_l2
+            optimizer.zero_grad()
+            loss_l2.backward()
+
+            grad_coeff = self.compute_energy_grad_FD(M, H, initial_state, delta=delta)
             self.spectral_coeff.grad = grad_coeff
             optimizer.step()
 
@@ -226,13 +318,10 @@ class OurSpectral(object):
             for i in range(len(initial_states)):
                 H = [H0]
                 for i in range(self.n_Hs):
-                    H.append([Hs[i], self.generate_u(i)])
+                    H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy())])
                 psi0 = initial_states[i]
                 psi1 = target_states[i]
                 M = psi1 * psi1.trans() 
-                # print(psi1.trans())
-                # print(M)
-                # exit()
                 result = qp.mesolve(H, psi0, ts)
                 final_state = result.states[-1]
 
@@ -342,7 +431,7 @@ class OurSpectral(object):
             for k in range(Y.shape[0]):
                 H = [H0]
                 for i in range(self.n_Hs):
-                    H.append([Hs[i], self.generate_u(i)])
+                    H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy())])
                 psi0 = self.encoding_x(X[k], n_qubit)
                 result = qp.mesolve(H, psi0, ts)
                 final_state = result.states[-1]
@@ -618,7 +707,7 @@ class OurSpectral(object):
         return state, prob
 
 
-    def demo_finite_diff(self, n_samples=50, delta=0.001):
+    def demo_finite_diff(self, n_samples=50, delta=0.001, is_MC=True):
         I = np.array(
             [[1, 0], 
             [0, 1]])
@@ -655,48 +744,85 @@ class OurSpectral(object):
         self.n_Hs = len(Hs)
         # coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
         coeff = np.ones([self.n_Hs ,self.n_basis])
-        grad_finite_diff = np.zeros([self.n_Hs ,self.n_basis])
 
         ts = np.linspace(0, 1, self.n_step) 
 
-        def get_H(curr_coeff):
-            self.spectral_coeff = torch.tensor(curr_coeff, requires_grad=False)
-            _H = [H0]
-            for _i in range(self.n_Hs):
-                _H.append([Hs[_i], self.generate_u(_i)])
-            return _H
+        self.spectral_coeff = torch.ones([self.n_Hs ,self.n_basis])
+        H = [H0]
+        for i in range(self.n_Hs):
+            H.append([Hs[i], self.generate_u(i, self.spectral_coeff)])
 
-        def run_forward_sim(new_coeff):
-            _H = get_H(new_coeff)
-            result = qp.mesolve(_H, psi0, ts)
-            final_state = result.states[-1]
-            loss_energy = M.matrix_element(final_state, final_state)
-            return loss_energy.real
-
-        H = get_H(coeff)
-        grad_ours = self.sample_multiple_times(M, H, psi0, n_samples=50)
-
-        for i_Hs in range(self.n_Hs):
-            for i_basis in range(self.n_basis):
-                new_coeff_p = np.ones([self.n_Hs ,self.n_basis])
-                new_coeff_m = np.ones([self.n_Hs ,self.n_basis])
-                new_coeff_p[i_Hs][i_basis] = coeff[i_Hs][i_basis] + delta
-                E_p = run_forward_sim(new_coeff_p)
-                new_coeff_m[i_Hs][i_basis] = coeff[i_Hs][i_basis] - delta
-                E_m = run_forward_sim(new_coeff_m)
-                grad_finite_diff[i_Hs][i_basis] = (E_p - E_m) / delta / 2.0
+        grad_ours = self.sample_multiple_times(M, H, psi0, n_samples=n_samples, is_MC=is_MC)
+        grad_FD = self.compute_energy_grad_FD(M, H, psi0, delta=delta).detach().numpy()
         grad_ours = np.array(grad_ours)
-        # print(grad_ours.shape, grad_finite_diff.shape)
 
-        return grad_ours, grad_finite_diff
+        return grad_ours, grad_FD
 
+
+    def demo_train_with_FD(self, delta=0.001):
+        I = np.array([[1, 0], 
+                    [0, 1]])
+        X = np.array([[0, 1], 
+                    [1, 0]])
+        Y = (0+1.j) * np.array([[0, -1], 
+                            [1, 0]])
+        Z = np.array([[1, 0], 
+                    [0, -1]])
+
+        XI = np.kron(X, I)
+        IX = np.kron(I, X)
+        XX = np.kron(X, X)
+        IZ = np.kron(I, Z)
+        YY = np.kron(Y, Y)
+        ZI = np.kron(Z, I)
+        YI = np.kron(Y, I)
+        ZZ = np.kron(Z, Z)
+        OO = ZZ * 0
+        I = qp.Qobj(I)
+        X = qp.Qobj(X)
+        Y = qp.Qobj(Y)
+        Z = qp.Qobj(Z)
+        XI = qp.Qobj(XI)
+        IX = qp.Qobj(IX)
+        XX = qp.Qobj(XX)
+        YY = qp.Qobj(YY)
+        IZ = qp.Qobj(IZ)
+        ZI = qp.Qobj(ZI)
+        YI = qp.Qobj(YI)
+        ZZ = qp.Qobj(ZZ)
+        OO = qp.Qobj(OO) 
+
+        H0 = OO 
+        Hs = [ZZ, IX, XI]
+        # Hs = [XX, IZ, ZI]
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+
+        ee = np.kron(e, e)
+        gg = np.kron(g, g)
+
+        gg, ee = qp.Qobj(gg), qp.Qobj(ee)
+
+        psi0 = gg
+        # M = np.kron(np.array([[1, 3 + 1.j], [3 - 1.j, 2]]),
+        #             np.eye(2))
+        # M = qp.Qobj(M)
+
+        M = 0.5*XX + 0.2*YY + ZZ + IZ
+        M = qp.Qobj(M)
+
+        self.train_energy_FD(M, H0, Hs, psi0, delta=delta)
+
+        
 
 if __name__ == '__main__':
     ours_spectral = OurSpectral(basis='Legendre', n_basis=6)
-    ours_spectral.demo_finite_diff(50)
+    # ours_spectral.demo_finite_diff(n_samples=50, delta=1e-5, is_MC=False)
     # ours_spectral = ours_spectral.demo_learning()
     # ours_spectral = ours_spectral.demo_qaoa_max_cut4()
     # ours_spectral.demo_fidelity()
     # ours_spectral.demo_energy_qubit2()
+    ours_spectral.demo_train_with_FD()
     # ours_spectral.demo_energy()
 
