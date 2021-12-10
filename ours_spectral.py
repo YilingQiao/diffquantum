@@ -68,7 +68,6 @@ class OurSpectral(object):
                 ps_m = M.matrix_element(ket_m, ket_m)
 
                 ps = (0.5 / r * (ps_m - ps_p)).real
-
                 
                 n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis 
                 for j in range(n):
@@ -81,9 +80,9 @@ class OurSpectral(object):
                         grad_coeff[i][j] = ps * np.cos(2 * np.pi * j * s) 
                         grad_coeff[i][j + n] =  ps * np.sin(2 * np.pi * j * s) 
 
-            # grads_coeffs.append(np.expand_dims(grad_coeff, 0))
             grads_coeffs.append(grad_coeff)
-        return grads_coeffs
+
+        return np.array(grads_coeffs)
 
     def compute_energy_grad_MC(self, M, H, initial_state, coeff=1.0):
         """Compute the gradient of engergy function <psi(1)|M|psi(1)>
@@ -742,7 +741,6 @@ class OurSpectral(object):
         M = qp.Qobj(M)
 
         self.n_Hs = len(Hs)
-        # coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
         coeff = np.ones([self.n_Hs ,self.n_basis])
 
         ts = np.linspace(0, 1, self.n_step) 
@@ -754,7 +752,6 @@ class OurSpectral(object):
 
         grad_ours = self.sample_multiple_times(M, H, psi0, n_samples=n_samples, is_MC=is_MC)
         grad_FD = self.compute_energy_grad_FD(M, H, psi0, delta=delta).detach().numpy()
-        grad_ours = np.array(grad_ours)
 
         return grad_ours, grad_FD
 
