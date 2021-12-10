@@ -30,7 +30,7 @@ class OurSpectral(object):
         def _u(t, args):
             coeff_i = self.spectral_coeff.detach().numpy()[i]
             u = 0
-            n = self.n_basis if self.basis == 'poly' else int(self.n_basis / 2)
+            n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis
             for j in range(n):
                 if self.basis == 'poly':
                     u += coeff_i[j] * (t - 0.5)**j
@@ -42,8 +42,7 @@ class OurSpectral(object):
             return u
         return _u
 
-    def sample_multiple_times(self, M, H, initial_state):
-        n_samples = 100
+    def sample_multiple_times(self, M, H, initial_state, n_samples=100):
         grads_coeffs = []
 
         for ss in range(n_samples):
@@ -71,7 +70,8 @@ class OurSpectral(object):
 
                 ps = (0.5 / r * (ps_m - ps_p)).real
 
-                n = int(self.n_basis / 2) if self.basis == 'poly' else self.n_basis  
+                
+                n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis 
                 for j in range(n):
                     if self.basis == 'poly':
                         grad_coeff[i][j] = (s-0.5)**j * ps
@@ -79,18 +79,12 @@ class OurSpectral(object):
                         pj = legendre(j)
                         grad_coeff[i][j] = pj(2 * s - 1) * ps
                     elif self.basis == 'Fourier':
-                        grad_coeff[i][j] = ps * (np.cos(2 * np.pi * j * s) \
-                            + np.sin(2 * np.pi * j * s) )
+                        grad_coeff[i][j] = ps * np.cos(2 * np.pi * j * s) 
+                        grad_coeff[i][j + n] =  ps * np.sin(2 * np.pi * j * s) 
 
             # grads_coeffs.append(np.expand_dims(grad_coeff, 0))
             grads_coeffs.append(grad_coeff)
-        grads_coeffs = np.concatenate(grads_coeffs, 0)
-        print(grads_coeffs.shape)
-        print(grads_coeffs.mean(0))
-        print(grads_coeffs.std(0))
-        plt.clf()
-        plt.hist(grads_coeffs[:,0])
-        plt.show()
+        return grads_coeffs
 
     def compute_energy_grad_MC(self, M, H, initial_state, coeff=1.0):
         """Compute the gradient of engergy function <psi(1)|M|psi(1)>
@@ -135,8 +129,8 @@ class OurSpectral(object):
                     pj = legendre(j)
                     grad_coeff[i][j] = pj(2 * s - 1) * ps
                 elif self.basis == 'Fourier':
-                    grad_coeff[i][j] = ps * (np.cos(2 * np.pi * j * s) \
-                        + np.sin(2 * np.pi * j * s) )
+                    grad_coeff[i][j] = ps * np.cos(2 * np.pi * j * s) 
+                    grad_coeff[i][j + n] =  ps * np.sin(2 * np.pi * j * s) 
         return torch.from_numpy(grad_coeff)
 
     def save_plot(self, plot_name):
@@ -624,9 +618,83 @@ class OurSpectral(object):
         return state, prob
 
 
+    def demo_finite_diff(self, n_samples=50, delta=0.001):
+        I = np.array(
+            [[1, 0], 
+            [0, 1]])
+        X = np.array(
+            [[0, 1], 
+            [1, 0]])
+        Y = (0+1j) * np.array(
+            [[0, -1], 
+            [1, 0]])
+        Z = np.array(
+            [[1, 0], 
+            [0, -1]])
+
+        I = qp.Qobj(I)
+        X = qp.Qobj(X)
+        Y = qp.Qobj(Y)
+        Z = qp.Qobj(Z)
+
+        H0 = I
+        Hs = [X, Z]
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+
+        ee = np.kron(e, e)
+        gg = np.kron(g, g)
+
+        gg, ee = qp.Qobj(gg), qp.Qobj(ee)
+
+        psi0 = qp.Qobj(g) 
+        M = np.array([[1, 3 + 1.j], [3 - 1.j, 2]])
+        M = qp.Qobj(M)
+
+        self.n_Hs = len(Hs)
+        # coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
+        coeff = np.ones([self.n_Hs ,self.n_basis])
+        grad_finite_diff = np.zeros([self.n_Hs ,self.n_basis])
+
+        ts = np.linspace(0, 1, self.n_step) 
+
+        def get_H(curr_coeff):
+            self.spectral_coeff = torch.tensor(curr_coeff, requires_grad=False)
+            _H = [H0]
+            for _i in range(self.n_Hs):
+                _H.append([Hs[_i], self.generate_u(_i)])
+            return _H
+
+        def run_forward_sim(new_coeff):
+            _H = get_H(new_coeff)
+            result = qp.mesolve(_H, psi0, ts)
+            final_state = result.states[-1]
+            loss_energy = M.matrix_element(final_state, final_state)
+            return loss_energy.real
+
+        H = get_H(coeff)
+        grad_ours = self.sample_multiple_times(M, H, psi0, n_samples=50)
+
+        for i_Hs in range(self.n_Hs):
+            for i_basis in range(self.n_basis):
+                new_coeff_p = np.ones([self.n_Hs ,self.n_basis])
+                new_coeff_m = np.ones([self.n_Hs ,self.n_basis])
+                new_coeff_p[i_Hs][i_basis] = coeff[i_Hs][i_basis] + delta
+                E_p = run_forward_sim(new_coeff_p)
+                new_coeff_m[i_Hs][i_basis] = coeff[i_Hs][i_basis] - delta
+                E_m = run_forward_sim(new_coeff_m)
+                grad_finite_diff[i_Hs][i_basis] = (E_p - E_m) / delta / 2.0
+        grad_ours = np.array(grad_ours)
+        # print(grad_ours.shape, grad_finite_diff.shape)
+
+        return grad_ours, grad_finite_diff
+
+
 if __name__ == '__main__':
     ours_spectral = OurSpectral(basis='Legendre', n_basis=6)
-    ours_spectral = ours_spectral.demo_learning()
+    ours_spectral.demo_finite_diff(50)
+    # ours_spectral = ours_spectral.demo_learning()
     # ours_spectral = ours_spectral.demo_qaoa_max_cut4()
     # ours_spectral.demo_fidelity()
     # ours_spectral.demo_energy_qubit2()
