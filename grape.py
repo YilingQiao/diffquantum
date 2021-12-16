@@ -1,6 +1,9 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy
+from scipy.special import legendre
+from scipy.stats import unitary_group
 
 
 class Grape(object):
@@ -8,12 +11,13 @@ class Grape(object):
     Args:
         taylor_terms: number of taylor expansion terms.
     """
-    def __init__(self, taylor_terms=5, n_step=100, n_epoch=200):
+    def __init__(self, taylor_terms=5, n_step=100, n_epoch=200, lr=2e-2):
         self.taylor_terms = taylor_terms
         self.n_step = n_step
         self.log_dir = "./logs/"
         self.log_name = 'grape'
         self.n_epoch = n_epoch
+        self.lr = lr
 
     def train_fidelity(self, init_u, H0, Hs, initial_states, target_states, dt):
         """Control the systems to reach target states.
@@ -27,7 +31,7 @@ class Grape(object):
         Returns:
             us: optimized pulses.
         """
-        lr = 2e-2
+        lr = self.lr
         w_l2 = 1e-3
         max_amplitude = torch.from_numpy(4 * np.ones(len(Hs)))
         Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
@@ -56,6 +60,7 @@ class Grape(object):
         return us
 
     def save_plot(self, plot_name, us):
+        return
         np_us = us.detach().numpy()
         plt.clf()
         x = np.array([i * (1. / self.n_step) for i in range(self.n_step + 1)])
@@ -79,7 +84,7 @@ class Grape(object):
         Returns:
             us: optimized pulses.
         """
-        lr = 2e-2
+        lr = self.lr
         w_l2 = 1e-3
         Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
         H0 = torch.tensor(self.c_to_r_mat(-1j * dt * H0)) 
@@ -89,7 +94,7 @@ class Grape(object):
         M = torch.from_numpy(M)
 
         self.losses_energy = []
-        for epoch in range(self.n_epoch + 1):
+        for epoch in range(1, self.n_epoch + 1):
             if epoch % 20 == 0:
                 self.save_plot(epoch, us)
             v = self.forward_simulate(us, H0, Hs, initial_states)
@@ -173,7 +178,7 @@ class Grape(object):
         Returns:
             us: optimized pulses.
         """
-        lr = 2e-2
+        lr = self.lr
         w_l2 = 1e-3
         Hs = [torch.tensor(self.c_to_r_mat(-1j * dt * H)) for H in Hs]
         # print(Hs)
@@ -303,19 +308,19 @@ class Grape(object):
         
     @staticmethod
     def random_initialize_u(n_step, n_Hs):
-        # initial_mean = 0
-        # initial_stddev = 1e-3 # (1. / np.sqrt(n_step))
-        # u = np.random.normal(initial_mean, initial_stddev, [n_step ,n_Hs])
+        initial_mean = 0
+        initial_stddev = 1e-1 # (1. / np.sqrt(n_step))
+        u = np.random.normal(initial_mean, initial_stddev, [n_step ,n_Hs])
 
-        def f(t):
-            n = int(n_step / 2)
-            u = 0   
-            for j in range(n):
-                    u += np.cos(2 * np.pi * j * t) \
-                        + np.sin(2 * np.pi * j * t) 
-            return u
+        # def f(t):
+        #     n = int(n_step / 2)
+        #     u = 0   
+        #     for j in range(n):
+        #             u += np.cos(2 * np.pi * j * t) \
+        #                 + np.sin(2 * np.pi * j * t) 
+        #     return u
 
-        u = np.array([[f(t) for i in range(n_Hs)] for t in np.linspace(0, 1, n_step)])
+        # u = np.array([[f(t) for i in range(n_Hs)] for t in np.linspace(0, 1, n_step)])
         # plt.plot(u[:,0])
         # plt.show()
         # exit()
@@ -328,7 +333,7 @@ class Grape(object):
         qubit_num = 1
         freq_ge = 3.9 # GHz
         dt = 1./self.n_step
-        n_step = 100
+        n_step = self.n_step
 
         Q_x = np.diag(np.sqrt(np.arange(1, qubit_state_num)), 1) \
                 + np.diag(np.sqrt(np.arange(1, qubit_state_num)), -1)
@@ -351,6 +356,77 @@ class Grape(object):
 
         init_u = self.random_initialize_u(n_step, len(Hs))
         final_u = self.train_fidelity(init_u, H0, Hs, initial_states, target_states, dt)
+
+    def demo_gate_synthesis(self):
+        """demo of synthesize arbitary unitary gate
+        """
+        n_step = self.n_step
+        dt = 1. / self.n_step
+
+        n_sample = 2
+        I = np.array([[1, 0], 
+                    [0, 1]])
+        X = np.array([[0, 1], 
+                    [1, 0]])
+        Y = (0+1j) * np.array([[0, -1], 
+                            [1, 0]])
+        Z = np.array([[1, 0], 
+                    [0, -1]])
+
+        H_to_learn = np.array([[2, 0.5 + 1.j], [0.5 - 1.j, -2]])
+        U_to_learn = scipy.linalg.expm(-1.j * H_to_learn)
+        # U_to_learn = unitary_group.rvs(2)
+        print(U_to_learn)
+
+        H0 = I * 0.0
+        Hs = [X, Z]
+
+        g = np.array([1., 0.])
+        e = np.array([0., 1.])
+        psi_in = []
+        psi_out = []
+        for i in range(n_sample):
+            x = g * i / (n_sample - 1) + e * (n_sample - i - 1) / (n_sample - 1)
+            x = x / np.linalg.norm(x)
+            y = np.squeeze(np.matmul(U_to_learn, np.expand_dims(x, 1)))
+            psi_in.append(x)
+            psi_out.append(y)
+            print(x, y, np.linalg.norm(x), np.linalg.norm(y))
+
+
+        target_states = [self.c_to_r_vec(v) for v in psi_out]
+        initial_states = [self.c_to_r_vec(v) for v in psi_in]
+
+        init_u = self.random_initialize_u(n_step, len(Hs))
+        final_u = self.train_fidelity(init_u, H0, Hs, initial_states, target_states, dt)
+
+        # qubit_state_num = 2
+        # qubit_num = 1
+        # freq_ge = 3.9 # GHz
+        # dt = 1./self.n_step
+        # n_step = 100
+
+        # Q_x = np.diag(np.sqrt(np.arange(1, qubit_state_num)), 1) \
+        #         + np.diag(np.sqrt(np.arange(1, qubit_state_num)), -1)
+        # Q_y = (0+1j) *(np.diag(np.sqrt(np.arange(1, qubit_state_num)), 1) \
+        #         - np.diag(np.sqrt(np.arange(1, qubit_state_num)), -1))
+        # Q_z = np.diag(np.arange(0, qubit_state_num))
+        # ens = np.array([2 * np.pi * ii * freq_ge for ii in np.arange(qubit_state_num)])
+        # H_q = np.diag(ens)
+        # H0 = H_q
+        # H0 = np.eye(qubit_state_num)
+        # Hs = [Q_x]
+
+        # g = np.array([1,0])
+        # e = np.array([0,1])
+        # psi0 = [g, e]
+            
+        # psi1 = [e, g]
+        # target_states = [self.c_to_r_vec(v) for v in psi1]
+        # initial_states = [self.c_to_r_vec(v) for v in psi0]
+
+        # init_u = self.random_initialize_u(n_step, len(Hs))
+        # final_u = self.train_fidelity(init_u, H0, Hs, initial_states, target_states, dt)
 
 
     def demo_energy_qubit1(self):
@@ -478,8 +554,134 @@ class Grape(object):
         init_u = self.random_initialize_u(self.n_step, len(Hs))
         self.train_learning(n_qubit, M, init_u, x, y, H0, Hs, dt)
 
+
+    def demo_TIM(self):
+        n_qubit = 4
+        dt = 1./self.n_step
+
+        I = np.array([[1.+ 0.j, 0], 
+                    [0, 1.]])
+        O = np.array([[0.+ 0.j, 0], 
+                    [0, 0.]])
+        X = np.array([[0 + 0.j, 1], 
+                    [1, 0]])
+        Y = (0+1j) * np.array([[0, -1], 
+                            [1, 0]])
+        Z = np.array([[1.0 + 0.j, 0], 
+                    [0, -1.0]])
+
+        coeff_zz = 1/4
+        coeff_b = 1/4
+
+        M = Grape.multi_kron(*[O for j in range(n_qubit)])
+        for i in range(n_qubit):
+            ss = Grape.multi_kron(*[I if j not in [i, (i + 1) % n_qubit] else Z
+                for j in range(n_qubit)])  
+            M += coeff_zz * ss
+
+        for i in range(n_qubit):
+            b = Grape.multi_kron(*[I if j!=i else X
+                for j in range(n_qubit)])  
+            M += coeff_b * b
+        M = self.c_to_r_mat(M)
+
+
+        H0 = Grape.multi_kron(*[O for j in range(n_qubit)])
+        for i in range(0, n_qubit):
+            H0 += Grape.multi_kron(*[I if j not in [i] else Y for j in range(n_qubit)])
+
+        Hs = []
+        for i in range(n_qubit):
+            H = Grape.multi_kron(*[I if j not in [i, (i + 1) % n_qubit] else Z for j in range(n_qubit)]) 
+            Hs.append(H)
+
+        for i in range(n_qubit):
+            H = Grape.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
+            Hs.append(H)
+
+        # H0 = Grape.multi_kron(*[O for j in range(n_qubit)])
+        # for i in range(1, n_qubit):
+        #     H0 += Grape.multi_kron(*[I if j not in [0, i] else X for j in range(n_qubit)])
+
+
+        # Hs = []
+        # Hs.append(Grape.multi_kron(*[I if j!=0 else Z for j in range(n_qubit)]))
+        # Hs.append(Grape.multi_kron(*[I if j!=0 else Y for j in range(n_qubit)]))
+        # H = Grape.multi_kron(*[O for j in range(n_qubit)])
+        # for i in range(n_qubit):
+        #     H += Grape.multi_kron(*[I if j!=i else Y for j in range(n_qubit)]) 
+        # Hs.append(H)
+
+        psi0 = np.ones([2**n_qubit])  / np.sqrt(2**n_qubit) 
+        psi0 = self.c_to_r_vec(psi0)
+        init_u = self.random_initialize_u(self.n_step, len(Hs))
+        final_u = self.train_energy(M, init_u, H0, Hs, psi0, dt)
+
+
+    # def demo_TIM(self):
+    #     n_qubit = 4
+    #     dt = 1./self.n_step
+
+    #     I = np.array([[1.+ 0.j, 0], 
+    #                 [0, 1.]])
+    #     O = np.array([[0.+ 0.j, 0], 
+    #                 [0, 0.]])
+    #     X = np.array([[0 + 0.j, 1], 
+    #                 [1, 0]])
+    #     Y = (0+1j) * np.array([[0, -1], 
+    #                         [1, 0]])
+    #     Z = np.array([[1.0 + 0.j, 0], 
+    #                 [0, -1.0]])
+
+    #     coeff_zz = 1/4
+    #     coeff_b = 1/2
+
+    #     M = Grape.multi_kron(*[O for j in range(n_qubit)])
+    #     for i in range(n_qubit):
+    #         ss = Grape.multi_kron(*[I if j not in [i, i+1] else Z
+    #             for j in range(n_qubit)])  
+    #         M += coeff_zz * ss
+    #         b = Grape.multi_kron(*[I if j!=i else X
+    #             for j in range(n_qubit)])  
+
+    #         M += coeff_b * b
+    #     M = self.c_to_r_mat(M)
+
+    #     H0 = Grape.multi_kron(*[O for j in range(n_qubit)])
+    #     for i in range(0, n_qubit):
+    #         H0 += Grape.multi_kron(*[I if j not in [i] else Y for j in range(n_qubit)])
+
+    #     Hs = []
+    #     H = Grape.multi_kron(*[O for j in range(n_qubit)])
+    #     for i in range(0, n_qubit):
+    #         H = Grape.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)]) 
+    #         Hs.append(H)
+
+    #     H = Grape.multi_kron(*[O for j in range(n_qubit)])
+    #     for i in range(1, n_qubit):
+    #         H = Grape.multi_kron(*[I if j not in [i, i+1] else Z for j in range(n_qubit)]) 
+    #         Hs.append(H)
+
+    #     # H0 = Grape.multi_kron(*[O for j in range(n_qubit)])
+    #     # for i in range(1, n_qubit):
+    #     #     H0 += Grape.multi_kron(*[I if j not in [0, i] else X for j in range(n_qubit)])
+
+
+    #     # Hs = []
+    #     # Hs.append(Grape.multi_kron(*[I if j!=0 else Z for j in range(n_qubit)]))
+    #     # Hs.append(Grape.multi_kron(*[I if j!=0 else Y for j in range(n_qubit)]))
+    #     # H = Grape.multi_kron(*[O for j in range(n_qubit)])
+    #     # for i in range(n_qubit):
+    #     #     H += Grape.multi_kron(*[I if j!=i else Y for j in range(n_qubit)]) 
+    #     # Hs.append(H)
+
+    #     psi0 = np.ones([2**n_qubit])  / np.sqrt(2**n_qubit) 
+    #     psi0 = self.c_to_r_vec(psi0)
+    #     init_u = self.random_initialize_u(self.n_step, len(Hs))
+    #     final_u = self.train_energy(M, init_u, H0, Hs, psi0, dt)
 if __name__ == '__main__':
-    grape = Grape(taylor_terms=20, n_step=9)
-    grape.demo_learning()
+    grape = Grape(taylor_terms=20, n_step=8)
+    # grape.demo_TIM()
+    grape.demo_gate_synthesis()
     # grape.demo_energy_qubit1()
     # grape.demo_energy_qubit2()

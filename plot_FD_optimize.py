@@ -6,6 +6,7 @@ from grape import Grape
 n_parameters = 6
 n_epoch = 200
 delta = 1e-3
+lr = 2e-2
 
 
 ours_FD = OurSpectral(n_basis=n_parameters, basis='Legendre', n_epoch=n_epoch)

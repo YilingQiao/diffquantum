@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from ours_spectral import OurSpectral
 
-n_samples = 500
+n_samples = 50
 n_basis = 3
 delta = 1e-5
 

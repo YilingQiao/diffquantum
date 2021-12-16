@@ -109,7 +109,7 @@ def qaoa_maxcut(steps=10, n_layers=1):
         for edge in graph:
             # objective for the MaxCut problem
             neg_obj -= 0.5 * (1 - circuit(gammas, betas, edge=edge, n_layers=n_layers))
-        print("{.4f}".format(neg_obj.data), "--")
+        # print("{.4f}".format(neg_obj.data), "--")
         return neg_obj
 
     # initialize optimizer: Adagrad works well empirically
