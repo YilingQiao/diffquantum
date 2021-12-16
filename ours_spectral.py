@@ -12,7 +12,7 @@ class OurSpectral(object):
     Args:
         n_basis: number of Fourier basis.
     """
-    def __init__(self, n_basis=5, basis='Fourier', n_epoch=200, n_step=100, lr=2e-2):
+    def __init__(self, n_basis=5, basis='Fourier', n_epoch=200, n_step=100, lr=2e-2, is_noisy=False):
         self.n_basis = n_basis
         self.log_dir = "./logs/"
         self.log_name = basis
@@ -20,6 +20,7 @@ class OurSpectral(object):
         self.n_epoch = n_epoch
         self.n_step = n_step
         self.lr = lr
+        self.is_noisy = is_noisy
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
 
@@ -61,21 +62,19 @@ class OurSpectral(object):
                 d = initial_state.shape[0]
                 gate_p = (qp.qeye(d) + r * 1.j * H[i+1][0]) / np.sqrt(1. + r**2)
                 gate_m = (qp.qeye(d) - r * 1.j * H[i+1][0]) / np.sqrt(1. + r**2)
-                # print(gate_p)
-                # print(H[i+1][0])
-                # print("=====", r)
-                # print(gate_m.dag() * gate_m )
-                # print(gate_p.dag() * gate_p )
-                # exit()
+
                 result = qp.mesolve(H, gate_p * phi, ts1)
                 ket_p = result.states[-1]
                 ps_p = M.matrix_element(ket_p, ket_p)
+                if self.is_noisy:
+                    ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
 
                 result = qp.mesolve(H, gate_m * phi, ts1)
                 ket_m = result.states[-1]
                 ps_m = M.matrix_element(ket_m, ket_m)
+                if self.is_noisy:
+                    ps_m += np.random.normal(scale=np.abs(ps_m.real) / 5)
 
-                # ps = (0.5 / r * (ps_m - ps_p)).real
                 ps = ( (1 + r**2) / 2 / r * (ps_m - ps_p)).real
                 
                 n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis 
@@ -115,19 +114,23 @@ class OurSpectral(object):
 
         for i in range(self.n_Hs):
             d = initial_state.shape[0]
-            gate_p = qp.qeye(d) + r * 1.j * H[i+1][0]
-            gate_m = qp.qeye(d) - r * 1.j * H[i+1][0]
+            gate_p = (qp.qeye(d) + r * 1.j * H[i+1][0]) / np.sqrt(1. + r**2)
+            gate_m = (qp.qeye(d) - r * 1.j * H[i+1][0]) / np.sqrt(1. + r**2)
 
             
             result = qp.mesolve(H, gate_p * phi, ts1)
             ket_p = result.states[-1]
             ps_p = M.matrix_element(ket_p, ket_p)
+            if self.is_noisy:
+                ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
 
             result = qp.mesolve(H, gate_m * phi, ts1)
             ket_m = result.states[-1]
             ps_m = M.matrix_element(ket_m, ket_m)
+            if self.is_noisy:
+                ps_m += np.random.normal(scale=np.abs(ps_m.real) / 5)
 
-            ps = coeff * (0.5 / r * (ps_m - ps_p)).real
+            ps = coeff * ( (1 + r**2) / 2 / r * (ps_m - ps_p)).real
 
             n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis  
             for j in range(n):
@@ -187,6 +190,8 @@ class OurSpectral(object):
             final_state = result.states[-1]
 
             loss_energy = M.matrix_element(final_state, final_state)
+            if self.is_noisy:
+                loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
             loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
                 [i**2 for i in range(self.n_basis)])).mean() * w_l2
             loss = loss_energy + loss_l2
@@ -231,6 +236,8 @@ class OurSpectral(object):
             result = qp.mesolve(_H, initial_state, ts)
             final_state = result.states[-1]
             loss_energy = M.matrix_element(final_state, final_state)
+            if self.is_noisy:
+                loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
             return loss_energy.real
 
         for i_Hs in range(self.n_Hs):
@@ -279,6 +286,8 @@ class OurSpectral(object):
             final_state = result.states[-1]
 
             loss_energy = M.matrix_element(final_state, final_state)
+            if self.is_noisy:
+                loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
             loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
                 [i**2 for i in range(self.n_basis)])).mean() * w_l2
             loss = loss_energy + loss_l2
@@ -336,6 +345,9 @@ class OurSpectral(object):
                 final_state = result.states[-1]
 
                 inner_product_norm = M.matrix_element(final_state, final_state)
+                if self.is_noisy:
+                    inner_product_norm += np.random.normal(
+                        scale=np.abs(inner_product_norm.real) / 5)
                 loss_fidelity = 1 - inner_product_norm
                 loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
                     [i**2 for i in range(self.n_basis)])).mean() * w_l2
@@ -446,6 +458,8 @@ class OurSpectral(object):
                 result = qp.mesolve(H, psi0, ts)
                 final_state = result.states[-1]
                 predict = M.matrix_element(final_state, final_state).real
+                if self.is_noisy:
+                    predict += np.random.normal(scale=np.abs(predict.real) / 5)
 
                 loss_fidelity = (Y[k] - predict)**2
                 # loss_energy = M.matrix_element(final_state, final_state)
@@ -613,7 +627,7 @@ class OurSpectral(object):
         Z = np.array([[1, 0], 
                     [0, -1]])
 
-        r = 2
+     
 
         H_to_learn = np.array([[2, 0.5 + 1.j], [0.5 - 1.j, -2]])
         # H_to_learn = np.array([[2, 0], [0, -2]])
@@ -726,19 +740,19 @@ class OurSpectral(object):
         OO = II * 0.0
 
         H0 = OO
-        H1 = OO
+        # H1 = OO
         H_cost = OO
-        for i in range(n_qubit):
-            if i == 0:
-                curr = X
-            else:
-                curr = I
-            for j in range(1, n_qubit):
-                if j == i:
-                    curr = np.kron(curr, X)
-                else:
-                    curr = np.kron(curr, I)
-            H1 = H1 + curr
+        # for i in range(n_qubit):
+        #     if i == 0:
+        #         curr = X
+        #     else:
+        #         curr = I
+        #     for j in range(1, n_qubit):
+        #         if j == i:
+        #             curr = np.kron(curr, X)
+        #         else:
+        #             curr = np.kron(curr, I)
+        #     H1 = H1 + curr
 
         for e in graph:
             if 0 in e:
@@ -753,11 +767,23 @@ class OurSpectral(object):
             H_cost += II - curr
         H_cost = - H_cost * 0.5
 
+
+        Hs = []
+        # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
+        for e in graph:
+            H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
+            Hs.append(H)
+
+        for i in range(n_qubit):
+            H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
+            Hs.append(H)
+
+        Hs = [qp.Qobj(H) for H in Hs]
+
         H_cost = qp.Qobj(H_cost)
         H0 = qp.Qobj(H0)
-        H1 = qp.Qobj(H1)
         superposition = qp.Qobj(superposition)
-        self.train_energy(H_cost, H0, [H1], superposition)
+        self.train_energy(H_cost, H0, Hs, superposition)
 
         state, prob = self.find_state(self.final_state)
         print("cut result is ", bin(state)[2:])
@@ -929,20 +955,6 @@ class OurSpectral(object):
         self.min_energy = M.eigenenergies()[0]
         print(M.eigenenergies())
 
-        # Hs = []
-        # Hs.append(OurSpectral.multi_kron(*[I if j!=0 else Z for j in range(n_qubit)]))
-        # Hs.append(OurSpectral.multi_kron(*[I if j!=0 else Y for j in range(n_qubit)]))
-
-        # H0 = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
-        # H0 = qp.Qobj(H0)
-
-        # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
-        # for i in range(n_qubit):
-        #     H += OurSpectral.multi_kron(*[I if j!=i else Y for j in range(n_qubit)]) 
-            
-        # Hs.append(H)
-
-
         H0 = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
         # for i in range(1, n_qubit):
         #     H0 += OurSpectral.multi_kron(*[I if j not in [0, i] else X for j in range(n_qubit)])
@@ -976,10 +988,12 @@ if __name__ == '__main__':
     ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=200)
     # ours_spectral.demo_finite_diff(n_samples=50, delta=1e-5, is_MC=False)
     # ours_spectral = ours_spectral.demo_learning()
-    # ours_spectral = ours_spectral.demo_qaoa_max_cut4()
+    # ours_spectral = ours_spectral.demo_gate_synthesis()
     # ours_spectral.demo_fidelity()
+    # ours_spectral.demo_TIM()
+    ours_spectral.demo_qaoa_max_cut4()
     # ours_spectral.demo_energy_qubit2()
-    ours_spectral.demo_gate_synthesis()
+    # ours_spectral.demo_gate_synthesis()
     # ours_spectral.demo_energy_qubit1()
     # ours_spectral.demo_energy()
 
