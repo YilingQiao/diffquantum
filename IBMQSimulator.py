@@ -118,9 +118,10 @@ for epoch in range(n_epoch) :
 
         derivRl[k], derivIl[k] = dvalue(n_basis, vRl[k], vIl[k], T, s, dL_dR, dL_dI)
 
+    log_file = open('log', 'a')
+    print('Epoch ' + str(epoch) + ' loss: ' + str(loss[-1]) + ' dsum: ' + str(sum(sum(abs(derivRl))) + sum(sum(abs(derivIl)))) + ' vRl: ' + str(vRl.tolist()) + ' vIl: ' + str(vIl.tolist()), file = log_file)
+    log_file.close()
+
     vRl += lr * derivRl
     vIl += lr * derivIl
 
-    log_file = open('log', 'a')
-    print('Epoch ' + str(epoch) + ' loss: ' + str(loss[-1]) + ' vsum: ' + str(sum(sum(abs(vRl))) + sum(sum(abs(vIl)))) + ' dsum: ' + str(sum(sum(abs(derivRl))) + sum(sum(abs(derivIl)))), file = log_file)
-    log_file.close()
