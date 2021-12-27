@@ -78,8 +78,8 @@ class OursPulse(object):
         self.T = T
         self.n_shots = n_shots
         self.n_qubit = n_qubit
-        if basis == 'Legendre':
-            self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
+        # if basis == 'Legendre':
+        #     self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
         self.start_engine()
 
     def start_engine(self, hub='ibm-q-community', group='ibmquantumawards', project='open-science-22'):
@@ -116,8 +116,8 @@ class OursPulse(object):
         job = execute(pulse_prog, sim_backend, shots=n_shots)
         res = job.result()
 
-        global sch
-        sch = pulse_prog
+        # global sch
+        # sch = pulse_prog
         return calcM(res.get_counts(), n_shots)
 
 
@@ -145,6 +145,27 @@ class OursPulse(object):
                 self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
         return grad_vRI
 
+    def order_1_norm(self, vRI, T):
+        # norm = lambda a : a
+
+        r, i = 0, 0
+        for qbt in range(self.n_qubit):
+            for t in range(T - 1):
+                rt0, it0 = 0, 0
+                rt1, it1 = 0, 0
+                for j in range(self.n_basis):
+                    rt0 += vRI[qbt, j, 0] * legendre(j)(2. * t / T - 1)
+                    it0 += vRI[qbt, j, 1] * legendre(j)(2. * t / T - 1)
+                    rt1 += vRI[qbt, j, 0] * legendre(j)(2. * (t + 1) / T - 1)
+                    it1 += vRI[qbt, j, 1] * legendre(j)(2. * (t + 1) / T - 1)
+                r += (rt1 - rt0)**2
+                i += (it1 - it0)**2
+        reg = 0
+        reg += torch.sqrt(r / self.n_qubit / (T - 1))
+        reg += torch.sqrt(i / self.n_qubit / (T - 1))        
+
+        return reg
+
 
     def train_energy(self):
         coeff = np.random.normal(0, 1e-3, [self.n_qubit ,self.n_basis, 2]) 
@@ -158,10 +179,12 @@ class OursPulse(object):
         for epoch in range(self.n_epoch):
             vRI = self.spectral_coeff.detach().numpy()
             loss = self.experiemnt(vRI, self.T, self.n_shots, self.backend, self.sim_backend)
+            loss_reg = 1e-2 * self.order_1_norm(self.spectral_coeff, self.T)
 
             optimizer.zero_grad()
+            loss_reg.backward()
             grad_vRI = self.grad_energy_MC()
-            self.spectral_coeff.grad += grad_coeff
+            self.spectral_coeff.grad += torch.from_numpy(grad_vRI)
             optimizer.step()
 
             print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
@@ -169,6 +192,7 @@ class OursPulse(object):
                 loss, 
                 loss
             ))
+            print("vRI: ", self.spectral_coeff)
 
 
     def demo_X(self):
