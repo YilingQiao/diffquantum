@@ -1,4 +1,3 @@
-import qutip as qp
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -51,21 +50,19 @@ def dvalue(n, vR, vI, T, t, dL_dR, dL_dI) :
 def mapC(x, y) :
     return x + 1j * y
 
-def calcM(counts, shots) :
-    # M = |1><1|
-    if '1' not in counts.keys() :
-        return 0
-    else :
-        return counts['1'] * 1. / shots
+def enlarge16(seq) :
+    if len(seq) % 16 != 0 :
+        seq += [0j for i in range(16 - len(seq) % 16)]
+    return seq
 
 class OursPulse(object):
-    """A class for using Fourier series to represent the amplitudes.
+    """A class for using Legendre series to represent the amplitudes.
     The derivatives are computed by our method.
     Args:
         n_basis: number of Fourier basis.
     """
-    def __init__(self, n_basis=5, basis='Fourier', n_epoch=200, n_step=100, 
-        lr=2e-2, is_noisy=False, T=128, n_shots=8192, n_qubit=1):
+    def __init__(self, n_basis=5, basis='Legendre', n_epoch=200, n_step=100, 
+                 lr=2e-2, is_noisy=False, T=128, n_shots=8192, n_qubit=1, pulse_simulation=True, init_coeff = None):
 
         self.n_basis = n_basis
         self.log_dir = "./logs/"
@@ -78,6 +75,9 @@ class OursPulse(object):
         self.T = T
         self.n_shots = n_shots
         self.n_qubit = n_qubit
+        self.pulse_simulation = pulse_simulation
+        self.init_coeff = init_coeff
+        self.exps = []
         # if basis == 'Legendre':
         #     self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
         self.start_engine()
@@ -91,63 +91,88 @@ class OursPulse(object):
         self.provider = IBMQ.get_provider(hub=hub, group=group, project=project)
         self.backend = self.provider.get_backend('ibmq_jakarta')
         #sim_noisy_jakarta = QasmSimulator.from_backend(backend)
-        self.sim_backend = PulseSimulator()
-        self.backend_model = PulseSystemModel.from_backend(self.backend)
-        self.sim_backend.set_options(system_model=self.backend_model)
+        if self.pulse_simulation :
+            self.sim_backend = PulseSimulator()
+            self.backend_model = PulseSystemModel.from_backend(self.backend)
+            self.sim_backend.set_options(system_model=self.backend_model)
 
-    @staticmethod
-    def experiemnt(vRI, T, n_shots, backend, sim_backend, 
-        s=0, qbt=-1, theta=0, phi=0, lam=0):
+    def clear_exps(self) :
+        self.exps = []
+
+    def add_experiment(self, vRI, s=0, qbt=-1, theta=0, phi=0, lam=0):
         n_qubit, n_basis = vRI.shape[0], vRI.shape[1]  
 
-        with pulse.build(backend) as pulse_prog :
+        with pulse.build(self.backend) as pulse_prog :
             for i in range(n_qubit) :
                 channel = pulse.drive_channel(i)
-                seq = [mapC(*value(n_basis, vRI[i,:,0], vRI[i,:,1], T, t)) for t in range(0, s)]
+                seq = enlarge16([mapC(*value(n_basis, vRI[i,:,0], vRI[i,:,1], self.T, t)) for t in range(0, s)])
                 if seq != [] :
                     pulse.play(seq, channel)
                 if qbt != -1 :
-                    pulse.u3(theta, phi, lam, qbt) # apply u3(theta, phi, lam) on qubit k
-                seq = [mapC(*value(n_basis, vRI[i,:,0], vRI[i,:,1], T, t)) for t in range(s, T)]
+                    pulse.u3(theta, phi, lam, qbt) # apply u3(theta, phi, lam) on qubit qbt
+                seq = enlarge16([mapC(*value(n_basis, vRI[i,:,0], vRI[i,:,1], self.T, t)) for t in range(s, self.T)])
                 if seq != [] :
                     pulse.play(seq, channel)
                 pulse.barrier(i)
-                reg = pulse.measure(i)
-        job = execute(pulse_prog, sim_backend, shots=n_shots)
-        res = job.result()
+                pulse.measure(i)
+        self.exps.append(pulse_prog)
 
-        # global sch
-        # sch = pulse_prog
-        return calcM(res.get_counts(), n_shots)
+    def run_experiments(self) :
+        self.counts_list = []
+        if self.pulse_simulation :
+            for i in range(len(self.exps)) :
+                job = execute(self.exps[i], self.sim_backend, shots=self.n_shots)
+                res = job.result()
+                self.counts_list.append(res.get_counts())
+        else :
+            job = execute(self.exps, self.backend, shots=self.n_shots)
+            res = job.result()
+            for i in range(len(self.exps)) :
+                self.counts_list.append(res.get_counts(i))
+        return self.counts_list
 
+    def calc_loss(self, counts) :
+        # M = |0><0|
+        # loss = <psi| |0><0| |psi>
+        if '0' not in counts.keys() :
+            return 0
+        else :
+            return counts['0'] * 1. / self.n_shots
 
     def grad_energy_MC(self):
         grad_vRI = np.zeros(self.spectral_coeff.shape)
         vRI = self.spectral_coeff.detach().numpy()
 
+        self.clear_exps()
         s = np.random.randint(self.T)
+        
+        self.add_experiment(vRI)
+        
+        for qbt in range(self.n_qubit) :
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2)
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=-np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2)
+
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=np.pi / 2, phi=0, lam=0)
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=-np.pi / 2, phi=0, lam=0)
+
+        counts_list = self.run_experiments()
+
+        loss = self.calc_loss(counts_list[0])
 
         for qbt in range(self.n_qubit) :
-            pm = self.experiemnt(vRI, self.T, self.n_shots, self.backend, self.sim_backend, 
-                s=s, qbt=qbt, theta=np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2)
-            pp = self.experiemnt(vRI, self.T, self.n_shots, self.backend, self.sim_backend, 
-                s=s, qbt=qbt, theta=-np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2)
+            pm = self.calc_loss(counts_list[4 * qbt + 1])
+            pp = self.calc_loss(counts_list[4 * qbt + 2])
             dL_dR = 1. / np.sqrt(2) * (pm - pp)
 
-
-            pm = self.experiemnt(vRI, self.T, self.n_shots, self.backend, self.sim_backend, 
-                s=s, qbt=qbt, theta=np.pi / 2, phi=0, lam=0)
-            pp = self.experiemnt(vRI, self.T, self.n_shots, self.backend, self.sim_backend, 
-                s=s, qbt=qbt, theta=-np.pi / 2, phi=0, lam=0)
+            pm = self.calc_loss(counts_list[4 * qbt + 3])
+            pp = self.calc_loss(counts_list[4 * qbt + 4])
             dL_dI = 1. / np.sqrt(2) * (pm - pp)
 
             grad_vRI[qbt,:,0], grad_vRI[qbt,:,1] = dvalue(
                 self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
-        return grad_vRI
+        return loss, grad_vRI
 
     def order_1_norm(self, vRI, T):
-        # norm = lambda a : a
-
         r, i = 0, 0
         for qbt in range(self.n_qubit):
             for t in range(T - 1):
@@ -168,29 +193,28 @@ class OursPulse(object):
 
 
     def train_energy(self):
-        coeff = np.random.normal(0, 1e-3, [self.n_qubit ,self.n_basis, 2]) 
-        # coeff = np.ones([self.n_qubit ,self.n_basis, 2])
+        if self.init_coeff == None :
+            coeff = np.random.normal(0, 1e-3, [self.n_qubit, self.n_basis, 2])
+        else :
+            coeff = self.init_coeff
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
-        qr = QuantumRegister(self.n_qubit)
         losses = []
 
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=self.lr)
 
         for epoch in range(self.n_epoch):
             vRI = self.spectral_coeff.detach().numpy()
-            loss = self.experiemnt(vRI, self.T, self.n_shots, self.backend, self.sim_backend)
             loss_reg = 1e-2 * self.order_1_norm(self.spectral_coeff, self.T)
 
             optimizer.zero_grad()
             loss_reg.backward()
-            grad_vRI = self.grad_energy_MC()
+            loss, grad_vRI = self.grad_energy_MC()
             self.spectral_coeff.grad += torch.from_numpy(grad_vRI)
             optimizer.step()
 
-            print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+            print("epoch: {:04d}, loss: {:.4f}".format(
                 epoch, 
                 loss, 
-                loss
             ))
             print("vRI: ", self.spectral_coeff)
 
@@ -199,7 +223,7 @@ class OursPulse(object):
         self.train_energy()
 
 if __name__ == '__main__':
-    ours_pulse = OursPulse(basis='Legendre', n_basis=4, T=16)
+    ours_pulse = OursPulse(basis='Legendre', n_basis=7, T=96)
     ours_pulse.demo_X()
     
 
