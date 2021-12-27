@@ -139,6 +139,67 @@ class OursPulse(object):
         else :
             return counts['0'] * 1. / self.n_shots
 
+
+    def grad_energy_s(self, s):
+        grad_vRI = np.zeros(self.spectral_coeff.shape)
+        vRI = self.spectral_coeff.detach().numpy()
+
+        self.clear_exps()
+        
+        self.add_experiment(vRI)
+        
+        for qbt in range(self.n_qubit) :
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2)
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=-np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2)
+
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=np.pi / 2, phi=0, lam=0)
+            self.add_experiment(vRI, s=s, qbt=qbt, theta=-np.pi / 2, phi=0, lam=0)
+
+        counts_list = self.run_experiments()
+
+        loss = self.calc_loss(counts_list[0])
+
+        for qbt in range(self.n_qubit) :
+            pm = self.calc_loss(counts_list[4 * qbt + 1])
+            pp = self.calc_loss(counts_list[4 * qbt + 2])
+            dL_dR = 1. / np.sqrt(2) * (pm - pp)
+
+            pm = self.calc_loss(counts_list[4 * qbt + 3])
+            pp = self.calc_loss(counts_list[4 * qbt + 4])
+            dL_dI = 1. / np.sqrt(2) * (pm - pp)
+
+            grad_vRI[qbt,:,0], grad_vRI[qbt,:,1] = dvalue(
+                self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
+        return grad_vRI
+
+
+    def grad_energy_FD(self, h):
+        grad_vRI = np.zeros(self.spectral_coeff.shape)
+        vRI = self.spectral_coeff.detach().numpy()
+
+        for qbt in range(self.n_qubit):
+            for i_basis in range(self.n_basis):
+                for k in range(2):
+                    pv, mv = vRI.copy(), vRI.copy()
+                    pv[qbt, i_basis, k] += h
+                    mv[qbt, i_basis, k] -= h
+                    self.add_experiment(pv)
+                    self.add_experiment(mv)
+
+        counts_list = self.run_experiments()
+
+        for qbt in range(self.n_qubit):
+            for i_basis in range(self.n_basis):
+                for k in range(2):
+                    i = qbt * 4 * n_basis + i_basis * 4 + k * 2
+                    pv = self.calc_loss(counts_list[i])
+                    mv = self.calc_loss(counts_list[i + 1])
+                    grad_vRI[qbt, i_basis, k] = (pv - mv) / h / 2.0
+
+        return grad_vRI
+
+
+
     def grad_energy_MC(self):
         grad_vRI = np.zeros(self.spectral_coeff.shape)
         vRI = self.spectral_coeff.detach().numpy()
@@ -193,9 +254,9 @@ class OursPulse(object):
 
 
     def train_energy(self):
-        if self.init_coeff == None :
+        if self.init_coeff == None:
             coeff = np.random.normal(0, 1e-3, [self.n_qubit, self.n_basis, 2])
-        else :
+        else:
             coeff = self.init_coeff
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
         losses = []
@@ -204,7 +265,6 @@ class OursPulse(object):
 
         for epoch in range(self.n_epoch):
             vRI = self.spectral_coeff.detach().numpy()
-            loss_reg = 1e-2 * self.order_1_norm(self.spectral_coeff, self.T)
 
             optimizer.zero_grad()
             loss_reg.backward()
@@ -219,11 +279,37 @@ class OursPulse(object):
             print("vRI: ", self.spectral_coeff)
 
 
+    def train_FD(self):
+        if self.init_coeff == None:
+            coeff = np.random.normal(0, 1e-3, [self.n_qubit, self.n_basis, 2]) * 0
+        else:
+            coeff = self.init_coeff
+        self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
+
+        vRI = self.spectral_coeff.detach().numpy()
+
+        h = 1e-2
+        grad_FD = self.grad_energy_FD(h)
+        print(grad_FD)
+
+        grads = []
+        for s in range(0, T, 48)
+            loss, grad_vRI = self.grad_energy_s(s)
+            grads.append(grad_vRI)
+        grad_s = np.array(grads).mean(0)
+        print("grad_s")
+        print(grad_s)
+
+
     def demo_X(self):
         self.train_energy()
 
+    def demo_FD(self):
+        self.train_FD()
+
 if __name__ == '__main__':
-    ours_pulse = OursPulse(basis='Legendre', n_basis=7, T=96)
-    ours_pulse.demo_X()
+    ours_pulse = OursPulse(basis='Legendre', n_basis=7, T=96, n_shots=16384)
+    # ours_pulse.demo_X()
+    ours_pulse.demo_FD()
     
 
