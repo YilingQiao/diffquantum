@@ -63,8 +63,8 @@ class OursPulse(object):
     Args:
         n_basis: number of basis.
     """
-    def __init__(self, n_basis=5, basis='Legendre', n_epoch=20,
-                 lr=2e-1, T=128, n_shots=8192, n_qubit=1, pulse_simulation=True, init_param = None):
+    def __init__(self, n_basis=5, basis='Legendre', n_epoch=40,
+                 lr=1e-2, T=128, n_shots=8192, n_qubit=1, pulse_simulation=True, init_param = None):
 
         self.n_basis = n_basis
         self.log_dir = "./logs/"
@@ -177,50 +177,51 @@ class OursPulse(object):
         posts = ['1', '0', '+']
         '''
         n_terms = 1
-        pres = ['+']
-        posts = ['+']
+        pres = ['0']
+        posts = ['1']
 
         for l in range(n_terms) :
             self.add_experiment(vRI, po, pre=pres[l], post=posts[l])
 
-        n_exp_per_qbt = 2
+        n_exp_per_qbt = 6
         for term in range(n_terms) :
             for qbt in range(self.n_qubit) :
-                #self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
-                #self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
                 
-                #self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
-                #self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
 
                 self.add_experiment(vRI, po, s=self.T, qbt=qbt, theta=0, phi=0, lam=np.pi/2, pre=pres[l], post=posts[l])
                 self.add_experiment(vRI, po, s=self.T, qbt=qbt, theta=0, phi=0, lam=-np.pi/2, pre=pres[l], post=posts[l])
 
         counts_list = self.run_experiments()
 
-        loss = 0
+        loss_list = []
         for l in range(n_terms) :
-            loss += self.calc_loss(counts_list[l], post=posts[l])
+            loss_list.append(self.calc_loss(counts_list[l], post=posts[l]))
+        loss = sum(loss_list)
 
         for l in range(n_terms) : 
             for qbt in range(self.n_qubit) :
                 index = l * self.n_qubit * n_exp_per_qbt + qbt * n_exp_per_qbt + n_terms
-                #pm = self.calc_loss(counts_list[index + 0], post=posts[l])
-                #pp = self.calc_loss(counts_list[index + 1], post=posts[l])
-                #dL_dR = pm - pp
+                pm = self.calc_loss(counts_list[index + 0], post=posts[l])
+                pp = self.calc_loss(counts_list[index + 1], post=posts[l])
+                dL_dR = pm - pp
 
-                #pm = self.calc_loss(counts_list[index + 2], post=posts[l])
-                #pp = self.calc_loss(counts_list[index + 3], post=posts[l])
-                #dL_dI = pm - pp
+                pm = self.calc_loss(counts_list[index + 2], post=posts[l])
+                pp = self.calc_loss(counts_list[index + 3], post=posts[l])
+                dL_dI = pm - pp
 
                 pm = self.calc_loss(counts_list[index + 0], post=posts[l])
                 pp = self.calc_loss(counts_list[index + 1], post=posts[l])
                 dL_dpo = pm - pp
 
-                #dv = dvalue(self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
-                #grad_vRI[qbt,:,0] += dv[0]
-                #grad_vRI[qbt,:,1] += dv[1]
+                dv = dvalue(self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
+                grad_vRI[qbt,:,0] += dv[0]
+                grad_vRI[qbt,:,1] += dv[1]
                 grad_po[qbt] += dL_dpo
-        return loss, grad_vRI, grad_po
+        return loss, grad_vRI, grad_po, loss_list
 
     def order_1_norm(self, vRI, T):
         r, i = 0, 0
@@ -252,15 +253,15 @@ class OursPulse(object):
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
         self.phase_offset = torch.tensor(po, requires_grad=True)
 
-        optimizer = torch.optim.Adam([self.spectral_coeff], lr=self.lr)
+        optimizer = torch.optim.Adam([self.spectral_coeff, self.phase_offset], lr=self.lr)
 
         for epoch in range(self.n_epoch):
             vRI = self.spectral_coeff.detach().numpy()
-            loss_reg = 0 * self.order_1_norm(self.spectral_coeff, self.T) + 0 * torch.sum(self.phase_offset)
+            loss_reg = 1e-2 * self.order_1_norm(self.spectral_coeff, self.T) + 0 * torch.sum(self.phase_offset)
 
             optimizer.zero_grad()
             loss_reg.backward()
-            loss, grad_vRI, grad_po = self.grad_energy_MC()
+            loss, grad_vRI, grad_po, loss_list = self.grad_energy_MC()
             self.spectral_coeff.grad += torch.from_numpy(grad_vRI)
             self.phase_offset.grad += torch.from_numpy(grad_po)
             optimizer.step()
@@ -269,6 +270,7 @@ class OursPulse(object):
                 epoch, 
                 loss, 
             ))
+            print("loss list: ", loss_list)
             print("param: ", (self.spectral_coeff, self.phase_offset))
 
             log_file = open('log', 'a')
@@ -276,6 +278,7 @@ class OursPulse(object):
                 epoch, 
                 loss, 
             ), file = log_file)
+            print("loss list: ", loss_list, file = log_file)
             print("param: ", (self.spectral_coeff, self.phase_offset), file = log_file)
             log_file.close()
 
@@ -283,7 +286,7 @@ class OursPulse(object):
         self.train_energy()
 
 if __name__ == '__main__':
-    op = OursPulse(basis='Legendre', n_basis=7, T=80, pulse_simulation = False, init_param = (np.array([[[ 0.3330, -0.0325], [ 0.1001,  0.0109], [-0.0929, -0.0586], [-0.0428,  0.0121], [ 0.3034, -0.0024], [-0.1033,  0.0141], [ 0.0274,  0.0046]]]), np.array([0.])))
+    op = OursPulse(basis='Legendre', n_basis=7, T=80, pulse_simulation = False)#, init_param = (np.array([[[ 0.3330, -0.0325], [ 0.1001,  0.0109], [-0.0929, -0.0586], [-0.0428,  0.0121], [ 0.3034, -0.0024], [-0.1033,  0.0141], [ 0.0274,  0.0046]]]), np.array([0.])))
     op.demo_X()
     
 
