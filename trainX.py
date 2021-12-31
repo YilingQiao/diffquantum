@@ -63,8 +63,10 @@ class OursPulse(object):
     Args:
         n_basis: number of basis.
     """
-    def __init__(self, n_basis=5, basis='Legendre', n_epoch=200,
-                 lr=5e-2, T=128, n_shots=8192, n_qubit=1, pulse_simulation=True, init_param = None):
+    def __init__(self, n_basis=5, basis='Legendre', n_epoch=40,
+                 lr=2e-2, T=128, n_shots=8192, n_qubit=1, 
+                 pulse_simulation=True, init_param = None,
+                 load_checkpoint=False, save_path="model.pt"):
 
         self.n_basis = n_basis
         self.log_dir = "./logs/"
@@ -78,6 +80,8 @@ class OursPulse(object):
         self.pulse_simulation = pulse_simulation
         self.init_param = init_param
         self.exps = []
+        self.load_checkpoint = load_checkpoint
+        self.save_path = save_path
         # if basis == 'Legendre':
         #     self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
         self.start_engine()
@@ -248,9 +252,25 @@ class OursPulse(object):
 
         return reg
 
+    def save_ckpt(self, epoch, save_path):
+        print('save ckpt to {} at epoch {}'.format(save_path, epoch))
+        torch.save({
+            'epoch': epoch + 1,
+            'spectral_coeff': self.spectral_coeff,
+            'phase_offset': self.phase_offset,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            }, save_path)
+
+    def load_ckpt(self, save_path):
+        ckpt = torch.load(save_path)
+        self.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        epoch = ckpt['epoch']
+        print('load ckpt from {} at epoch {}'.format(save_path, epoch))
+        return epoch
+
     def step(self, epoch) :
         vRI = self.spectral_coeff.detach().numpy()
-        loss_reg = 1e-2 * self.order_1_norm(self.spectral_coeff, self.T) + 0 * torch.sum(self.phase_offset)
+        loss_reg = 0 * self.order_1_norm(self.spectral_coeff, self.T) + 0 * torch.sum(self.phase_offset)
 
         self.optimizer.zero_grad()
         loss_reg.backward()
@@ -274,6 +294,8 @@ class OursPulse(object):
         print("loss list: ", loss_list, file = log_file)
         print("param: ", (self.spectral_coeff, self.phase_offset), file = log_file)
         log_file.close()        
+            
+        self.save_ckpt(epoch, self.optimizer, self.save_path)
 
     def train_energy(self):
         if self.init_param == None :
@@ -287,14 +309,22 @@ class OursPulse(object):
 
         self.optimizer = torch.optim.Adam([self.spectral_coeff, self.phase_offset], lr=self.lr)
 
-        for epoch in range(self.n_epoch):
+        init_epoch = 0
+        if self.load_checkpoint:
+            init_epoch = self.load_ckpt(self.save_path)
+            
+        for epoch in range(init_epoch, self.n_epoch + init_epoch):
             self.step(epoch)
 
     def demo_X(self):
         self.train_energy()
 
 if __name__ == '__main__':
-    op = OursPulse(basis='Legendre', n_basis=5, T=80, pulse_simulation = False)#, init_param = (np.array([[[ 0.3330, -0.0325], [ 0.1001,  0.0109], [-0.0929, -0.0586], [-0.0428,  0.0121], [ 0.3034, -0.0024], [-0.1033,  0.0141], [ 0.0274,  0.0046]]]), np.array([0.])))
+    op = OursPulse(basis='Legendre', n_basis=5, T=80, pulse_simulation = False, init_param = (np.array([[[-2.7550e-02,  3.9761e-01], \
+         [-3.5656e-02,  4.5210e-02], \
+         [-1.9346e-02,  5.9561e-02], \
+         [ 7.2024e-02,  7.0554e-03], \
+         [ 4.3864e-02, -3.7871e-05]]]), np.array([-0.5586])))
     op.demo_X()
     
 
