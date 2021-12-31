@@ -40,9 +40,12 @@ def value(n, vR, vI, T, t) :
 def dvalue(n, vR, vI, T, t, dL_dR, dL_dI) :
     r, i = value(n, vR, vI, T, t)
     (dR_dr, dR_di), (dI_dr, dI_di) = dnormC(r, i)
+    print(T, t)
+    print("(dR_dr, dR_di), (dI_dr, dI_di)", (dR_dr, dR_di), (dI_dr, dI_di))
     derivR = []
     derivI = []
     for j in range(n) :
+        print("legendre(j)(2. * t / T - 1))", legendre(j)(2. * t / T - 1))
         derivR.append((dL_dR * dR_dr + dL_dI * dI_dr) * legendre(j)(2. * t / T - 1))
         derivI.append((dL_dR * dR_di + dL_dI * dR_di) * legendre(j)(2. * t / T - 1))
     return np.array(derivR), np.array(derivI)
@@ -167,9 +170,11 @@ class OursPulse(object):
             pm = self.calc_loss(counts_list[4 * qbt + 3])
             pp = self.calc_loss(counts_list[4 * qbt + 4])
             dL_dI = 1. / np.sqrt(2) * (pm - pp)
+            print(dL_dR, dL_dI)
 
             grad_vRI[qbt,:,0], grad_vRI[qbt,:,1] = dvalue(
                 self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
+            print(grad_vRI[qbt,:,0], grad_vRI[qbt,:,1])
         return grad_vRI
 
 
@@ -191,7 +196,7 @@ class OursPulse(object):
         for qbt in range(self.n_qubit):
             for i_basis in range(self.n_basis):
                 for k in range(2):
-                    i = qbt * 4 * n_basis + i_basis * 4 + k * 2
+                    i = qbt * 4 * self.n_basis + i_basis * 4 + k * 2
                     pv = self.calc_loss(counts_list[i])
                     mv = self.calc_loss(counts_list[i + 1])
                     grad_vRI[qbt, i_basis, k] = (pv - mv) / h / 2.0
@@ -281,22 +286,28 @@ class OursPulse(object):
 
     def train_FD(self):
         if self.init_coeff == None:
-            coeff = np.random.normal(0, 1e-3, [self.n_qubit, self.n_basis, 2]) * 0
+            coeff = np.random.normal(0, 1e-3, [self.n_qubit, self.n_basis, 2]) * 0 + 1e-3
         else:
             coeff = self.init_coeff
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
 
         vRI = self.spectral_coeff.detach().numpy()
+        print(self.spectral_coeff)
+
+        grads = []
+        for s in range(1, self.T, 10):
+            print(s)
+            grad_vRI = self.grad_energy_s(s)
+            print(grad_vRI)
+            grads.append(grad_vRI)
+        print("=======")
+        grad_s = np.array(grads).mean(0)
 
         h = 1e-2
         grad_FD = self.grad_energy_FD(h)
+        print("grad_FD")
         print(grad_FD)
 
-        grads = []
-        for s in range(0, T, 48)
-            loss, grad_vRI = self.grad_energy_s(s)
-            grads.append(grad_vRI)
-        grad_s = np.array(grads).mean(0)
         print("grad_s")
         print(grad_s)
 
@@ -308,7 +319,7 @@ class OursPulse(object):
         self.train_FD()
 
 if __name__ == '__main__':
-    ours_pulse = OursPulse(basis='Legendre', n_basis=7, T=96, n_shots=16384)
+    ours_pulse = OursPulse(basis='Legendre', n_basis=4, T=96, n_shots=16384)
     # ours_pulse.demo_X()
     ours_pulse.demo_FD()
     

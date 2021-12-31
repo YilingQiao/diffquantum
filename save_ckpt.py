@@ -278,7 +278,7 @@ class OursPulse(object):
         if self.load_checkpoint:
             init_epoch = self.load_ckpt(optimizer, self.save_path)
             
-        for epoch in range(self.n_epoch):
+        for epoch in range(init_epoch, self.n_epoch):
             vRI = self.spectral_coeff.detach().numpy()
             loss_reg = 1e-2 * self.order_1_norm(self.spectral_coeff, self.T) + 0 * torch.sum(self.phase_offset)
 
