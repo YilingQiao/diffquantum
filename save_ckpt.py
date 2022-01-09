@@ -64,7 +64,7 @@ class OursPulse(object):
         n_basis: number of basis.
     """
     def __init__(self, n_basis=5, basis='Legendre', n_epoch=40,
-                 lr=2e-2, T=128, n_shots=8192, n_qubit=1, 
+                 lr=1e-2, T=128, n_shots=8192, n_qubit=1, 
                  pulse_simulation=True, init_param = None,
                  load_checkpoint=False, save_path="model.pt"):
 
@@ -173,29 +173,29 @@ class OursPulse(object):
         po = self.phase_offset.detach().numpy()
 
         self.clear_exps()
-        n_terms = 2
-        pres = ['0', '+']
-        posts = ['1', '+']
+        s = np.random.randint(self.T)
+
+        '''
+        n_terms = 3
+        pres = ['0', '1', '+']
+        posts = ['1', '0', '+']
+        '''
+        n_terms = 1
+        pres = ['0']
+        posts = ['1']
 
         for l in range(n_terms) :
             self.add_experiment(vRI, po, pre=pres[l], post=posts[l])
 
-        n_exp_XY = 4
-        n_exp_Z = 2
-        n_sample = 8
-        for sam in range(n_sample) :
-            for l in range(n_terms) :
-                for qbt in range(self.n_qubit) :
-                    s = np.random.randint(self.T)
-                    self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
-                    self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
-                    
-                    s = np.random.randint(self.T)
-                    self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
-                    self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
-
-        for l in range(n_terms) :
+        n_exp_per_qbt = 6
+        for term in range(n_terms) :
             for qbt in range(self.n_qubit) :
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=-np.pi / 2, lam=np.pi / 2, pre=pres[l], post=posts[l])
+                
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
+                self.add_experiment(vRI, po, s=s, qbt=qbt, theta=-np.pi / 2, phi=0, lam=0, pre=pres[l], post=posts[l])
+
                 self.add_experiment(vRI, po, s=self.T, qbt=qbt, theta=0, phi=0, lam=np.pi/2, pre=pres[l], post=posts[l])
                 self.add_experiment(vRI, po, s=self.T, qbt=qbt, theta=0, phi=0, lam=-np.pi/2, pre=pres[l], post=posts[l])
 
@@ -206,30 +206,24 @@ class OursPulse(object):
             loss_list.append(self.calc_loss(counts_list[l], post=posts[l]))
         loss = sum(loss_list)
 
-        for sam in range(n_sample) :
-            for l in range(n_terms) : 
-                for qbt in range(self.n_qubit) :
-                    index = sam * n_terms * self.n_qubit * n_exp_XY + l * self.n_qubit * n_exp_XY + qbt * n_exp_XY + n_terms
-                    pm = self.calc_loss(counts_list[index + 0], post=posts[l])
-                    pp = self.calc_loss(counts_list[index + 1], post=posts[l])
-                    dL_dR = pm - pp
-
-                    pm = self.calc_loss(counts_list[index + 2], post=posts[l])
-                    pp = self.calc_loss(counts_list[index + 3], post=posts[l])
-                    dL_dI = pm - pp
-
-                    dv = dvalue(self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
-                    grad_vRI[qbt,:,0] += dv[0]
-                    grad_vRI[qbt,:,1] += dv[1]
-        grad_vRI /= n_sample
-        
-        for l in range(n_terms) :
+        for l in range(n_terms) : 
             for qbt in range(self.n_qubit) :
-                index = n_sample * n_terms * self.n_qubit * n_exp_XY + l * self.n_qubit * n_exp_Z + qbt * n_exp_Z + n_terms
+                index = l * self.n_qubit * n_exp_per_qbt + qbt * n_exp_per_qbt + n_terms
+                pm = self.calc_loss(counts_list[index + 0], post=posts[l])
+                pp = self.calc_loss(counts_list[index + 1], post=posts[l])
+                dL_dR = pm - pp
+
+                pm = self.calc_loss(counts_list[index + 2], post=posts[l])
+                pp = self.calc_loss(counts_list[index + 3], post=posts[l])
+                dL_dI = pm - pp
+
                 pm = self.calc_loss(counts_list[index + 0], post=posts[l])
                 pp = self.calc_loss(counts_list[index + 1], post=posts[l])
                 dL_dpo = pm - pp
 
+                dv = dvalue(self.n_basis, vRI[qbt,:,0], vRI[qbt,:,1], self.T, s, dL_dR, dL_dI)
+                grad_vRI[qbt,:,0] += dv[0]
+                grad_vRI[qbt,:,1] += dv[1]
                 grad_po[qbt] += dL_dpo
         return loss, grad_vRI, grad_po, loss_list
 
@@ -252,50 +246,21 @@ class OursPulse(object):
 
         return reg
 
-    def save_ckpt(self, epoch, save_path):
+    def save_ckpt(self, epoch, optim, save_path):
         print('save ckpt to {} at epoch {}'.format(save_path, epoch))
         torch.save({
             'epoch': epoch + 1,
             'spectral_coeff': self.spectral_coeff,
             'phase_offset': self.phase_offset,
-            'optimizer_state_dict': self.optimizer.state_dict(),
+            'optimizer_state_dict': optim.state_dict(),
             }, save_path)
-
-    def load_ckpt(self, save_path):
+        
+    def load_ckpt(self, optim, save_path):
         ckpt = torch.load(save_path)
-        self.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        optim.load_state_dict(ckpt['optimizer_state_dict'])
         epoch = ckpt['epoch']
         print('load ckpt from {} at epoch {}'.format(save_path, epoch))
         return epoch
-
-    def step(self, epoch) :
-        vRI = self.spectral_coeff.detach().numpy()
-        loss_reg = 0 * self.order_1_norm(self.spectral_coeff, self.T) + 0 * torch.sum(self.phase_offset)
-
-        self.optimizer.zero_grad()
-        loss_reg.backward()
-        loss, grad_vRI, grad_po, loss_list = self.grad_energy_MC()
-        self.spectral_coeff.grad += torch.from_numpy(grad_vRI)
-        self.phase_offset.grad += torch.from_numpy(grad_po)
-        self.optimizer.step()
-
-        print("epoch: {:04d}, loss: {:.4f}".format(
-            epoch, 
-            loss, 
-        ))
-        print("loss list: ", loss_list)
-        print("param: ", (self.spectral_coeff, self.phase_offset))
-
-        log_file = open('log', 'a')
-        print("epoch: {:04d}, loss: {:.4f}".format(
-            epoch, 
-            loss, 
-        ), file = log_file)
-        print("loss list: ", loss_list, file = log_file)
-        print("param: ", (self.spectral_coeff, self.phase_offset), file = log_file)
-        log_file.close()        
-            
-        self.save_ckpt(epoch, self.optimizer, self.save_path)
 
     def train_energy(self):
         if self.init_param == None :
@@ -307,24 +272,47 @@ class OursPulse(object):
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
         self.phase_offset = torch.tensor(po, requires_grad=True)
 
-        self.optimizer = torch.optim.Adam([self.spectral_coeff, self.phase_offset], lr=self.lr)
-
+        optimizer = torch.optim.Adam([self.spectral_coeff, self.phase_offset], lr=self.lr)
+        
         init_epoch = 0
         if self.load_checkpoint:
-            init_epoch = self.load_ckpt(self.save_path)
+            init_epoch = self.load_ckpt(optimizer, self.save_path)
             
-        for epoch in range(init_epoch, self.n_epoch + init_epoch):
-            self.step(epoch)
+        for epoch in range(init_epoch, self.n_epoch):
+            vRI = self.spectral_coeff.detach().numpy()
+            loss_reg = 1e-2 * self.order_1_norm(self.spectral_coeff, self.T) + 0 * torch.sum(self.phase_offset)
+
+            optimizer.zero_grad()
+            loss_reg.backward()
+            loss, grad_vRI, grad_po, loss_list = self.grad_energy_MC()
+            self.spectral_coeff.grad += torch.from_numpy(grad_vRI)
+            self.phase_offset.grad += torch.from_numpy(grad_po)
+            optimizer.step()
+
+            print("epoch: {:04d}, loss: {:.4f}".format(
+                epoch, 
+                loss, 
+            ))
+            print("loss list: ", loss_list)
+            print("param: ", (self.spectral_coeff, self.phase_offset))
+
+            log_file = open('log', 'a')
+            print("epoch: {:04d}, loss: {:.4f}".format(
+                epoch, 
+                loss, 
+            ), file = log_file)
+            print("loss list: ", loss_list, file = log_file)
+            print("param: ", (self.spectral_coeff, self.phase_offset), file = log_file)
+            log_file.close()
+            
+            self.save_ckpt(epoch, optimizer, self.save_path)
 
     def demo_X(self):
         self.train_energy()
 
 if __name__ == '__main__':
-    op = OursPulse(basis='Legendre', n_basis=5, T=80, pulse_simulation = False, init_param = (np.array([[[-2.7550e-02,  3.9761e-01], \
-         [-3.5656e-02,  4.5210e-02], \
-         [-1.9346e-02,  5.9561e-02], \
-         [ 7.2024e-02,  7.0554e-03], \
-         [ 4.3864e-02, -3.7871e-05]]]), np.array([-0.5586])))
+    op = OursPulse(basis='Legendre', n_basis=7, T=80, 
+        pulse_simulation = True, load_checkpoint=False)#, init_param = (np.array([[[ 0.3330, -0.0325], [ 0.1001,  0.0109], [-0.0929, -0.0586], [-0.0428,  0.0121], [ 0.3034, -0.0024], [-0.1033,  0.0141], [ 0.0274,  0.0046]]]), np.array([0.])))
     op.demo_X()
     
 
