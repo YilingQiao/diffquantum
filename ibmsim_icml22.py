@@ -16,9 +16,9 @@ def leapfrog(H_, psi0_, T0, T, n_steps=5000):
     H = []
     for h in H_:
         if isinstance(h, list):
-            H.append([h[0].full(), h[1]])
+            H.append([h[0].full().real, h[1]])
         else:
-            H.append(h.full())
+            H.append(h.full().real)
 
     
     dt = (T - T0) / n_steps
@@ -42,7 +42,7 @@ def leapfrog(H_, psi0_, T0, T, n_steps=5000):
         t += dt/2
         for h in H:
             if isinstance(h, list):
-                Im -= 0.5 * dt * h[1](t) * h[0] @ Re
+                Im -= 0.5 * dt * h[1](t, None) * h[0] @ Re
             else:
                 Im -= 0.5 * dt * h @ Re
     ans = Re + 1.j * Im
