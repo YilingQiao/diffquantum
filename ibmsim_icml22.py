@@ -6,6 +6,51 @@ import scipy
 from scipy.special import legendre
 from scipy.stats import unitary_group
 
+# qp.mesolve(H, initial_state, t0s)
+# H = [H0, [H1, f1], ...]
+def leapfrog(H_, psi0_, T0, T, n_steps=5000):
+    psi0 = psi0_.full()
+    Re = np.real(psi0)
+    Im = np.imag(psi0)
+
+    H = []
+    for h in H_:
+        if isinstance(h, list):
+            H.append([h[0].full(), h[1]])
+        else:
+            H.append(h.full())
+
+    
+    dt = (T - T0) / n_steps
+    t = T0
+    
+
+    for k in range(n_steps):
+        Im_half = Im
+        for h in H:
+            if isinstance(h, list):
+                Im_half -= 0.5 * dt * h[1](t, None) * h[0] @ Re
+            else:
+                Im_half -= 0.5 * dt * h @ Re
+        t += dt/2
+        for h in H:
+            if isinstance(h, list):
+                Re += dt * h[1](t, None) * h[0] @ Im_half
+            else:
+                Re += dt * h @ Im_half
+        Im = Im_half
+        t += dt/2
+        for h in H:
+            if isinstance(h, list):
+                Im -= 0.5 * dt * h[1](t) * h[0] @ Re
+            else:
+                Im -= 0.5 * dt * h @ Re
+    ans = Re + 1.j * Im
+    ans = qp.Qobj(ans)
+        
+    return ans
+    
+
 class QubitControl(object):
     """A class for simulating single-qubit control on quantum hardware.
     The finest time-resolution dt will be rescaled to 1 in the numerical simulation.
@@ -177,9 +222,7 @@ class QubitControl(object):
                 ham, self.full_pulse(self.vv.detach().numpy(), Hs[i]['channels'])])
 
         for i in range(1, len(H)):
-            t0s = np.linspace(0, s, 10)
-            result = qp.mesolve(H, initial_state, t0s)
-            phi = result.states[-1]
+            phi = leapfrog(H, initial_state, 0, s)
             
             r = 1 / 2
             d = initial_state.shape[0]
@@ -187,14 +230,12 @@ class QubitControl(object):
             gate_m = (qp.qeye(d) - r * 1.j * H[i][0]) / np.sqrt(1. + r**2)
                 
             ts1 = np.linspace(s, self.duration, 10)
-            result = qp.mesolve(H, gate_p * phi, ts1)
-            ket_p = result.states[-1]
+            ket_p = leapfrog(H, gate_p * phi, s, self.duration)
             ps_p = M.matrix_element(ket_p, ket_p)
             if self.is_noisy:
                 ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
                 
-            result = qp.mesolve(H, gate_m * phi, ts1)
-            ket_m = result.states[-1]
+            ket_m = leapfrog(H, gate_m * phi, s, self.duration)
             ps_m = M.matrix_element(ket_m, ket_m)
 
             if self.is_noisy:
@@ -242,8 +283,7 @@ class QubitControl(object):
                 # _H[i], self.full_pulse(self.vv.detach().numpy(), i=i-1)])
 
         tarray = np.linspace(0, self.duration, 10)
-        result = qp.mesolve(H, initial_state, tarray)
-        psi_T = result.states[-1]  
+        psi_T = leapfrog(H, initial_state, 0, self.duration)
         return np.real(M.matrix_element(psi_T, psi_T))
     
     
@@ -563,6 +603,6 @@ if __name__ == '__main__':
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    model.demo_CNOT(num_sample, 'plain')
-    # model.demo_X(num_sample, 'plain')
+    # model.demo_CNOT(num_sample, 'plain')
+    model.demo_X(num_sample, 'plain')
     # model.demo_CNOT(num_sample, 'plain')
