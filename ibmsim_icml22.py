@@ -3,15 +3,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import scipy 
+import time
 from scipy.special import legendre
 from scipy.stats import unitary_group
 
 # qp.mesolve(H, initial_state, t0s)
 # H = [H0, [H1, f1], ...]
-def leapfrog(H_, psi0_, T0, T, n_steps=5000):
+def leapfrog(H_, psi0_, T0, T, n_steps=None):
     psi0 = psi0_.full()
     Re = np.real(psi0)
     Im = np.imag(psi0)
+    if n_steps is None:
+        n_steps = int(1000 * (T - T0))
+    start = time.time()
+    
 
     H = []
     for h in H_:
@@ -48,6 +53,7 @@ def leapfrog(H_, psi0_, T0, T, n_steps=5000):
     ans = Re + 1.j * Im
     ans = qp.Qobj(ans)
         
+    # print(T, T0, n_steps, time.time() - start)
     return ans
     
 
@@ -150,18 +156,6 @@ class QubitControl(object):
             _D: driving pulse D(t)
         """
         
-        # def _D(t, args):
-        #     if i is None:
-        #         coeff_i = vv
-        #     else:
-        #         coeff_i = vv[i]
-        #     # t ranges from [0, duration]
-        #     u = 0
-        #     for j in range(self.n_basis):
-        #         u += coeff_i[j] * legendre(j)(2 * t / self.duration - 1)
-            
-        #     return np.cos(self.w * t) * (2 * scipy.special.expit(u) - 1)
-
 
         # j, omega, freq, idx
 
@@ -170,27 +164,26 @@ class QubitControl(object):
             A = 0
             B = 0
             ans = 0
+            aa = time.time()
 
             for chan in channels:
                 i, omega, w, idx = chan
                 coeff_i = vv[:, idx, :]
 
                 for j in range(self.n_basis):
-                    A += coeff_i[0, j] * legendre(j)(2 * t / self.duration - 1)
-                    B += coeff_i[1, j] * legendre(j)(2 * t / self.duration - 1)
+                    A += coeff_i[0, j] * self.legendre_ps[j](2 * t / self.duration - 1)
+                    B += coeff_i[1, j] * self.legendre_ps[j](2 * t / self.duration - 1)
             
                 N = np.sqrt(A**2 + B**2)
                 ans += omega * (2 * scipy.special.expit(N) - 1)/N * (np.cos(w * t) * A + np.sin(w * t) * B)
 
-            #     print(omega, w)
-            # print(t, ans)
-            # exit()
             return ans
 
 
         return _D
     
-    
+    # ( 1 + 3 * n_H * num_sample)  * n_training
+    # 7  * 3
     def get_integrand(self, H0, Hs, M, initial_state, s):
         
         integrand = np.zeros(self.vv.shape)
@@ -205,8 +198,8 @@ class QubitControl(object):
             for chan in channels:
                 j, omega, w, idx = chan
 
-                legendre_A = [self.vv[0,idx,j] * legendre(j)(2 * s / self.duration - 1) for j in range(self.n_basis)]
-                legendre_B = [self.vv[1,idx,j] * legendre(j)(2 * s / self.duration - 1) for j in range(self.n_basis)]
+                legendre_A = [self.vv[0,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
+                legendre_B = [self.vv[1,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
                 A = sum(legendre_A)
                 B = sum(legendre_B)
                 N = torch.sqrt(torch.square(A)+torch.square(B))
@@ -282,7 +275,6 @@ class QubitControl(object):
                 ham, self.full_pulse(self.vv.detach().numpy(), Hs[i]['channels'])])
                 # _H[i], self.full_pulse(self.vv.detach().numpy(), i=i-1)])
 
-        tarray = np.linspace(0, self.duration, 10)
         psi_T = leapfrog(H, initial_state, 0, self.duration)
         return np.real(M.matrix_element(psi_T, psi_T))
     
@@ -381,7 +373,7 @@ class QubitControl(object):
             Hs[i]['H'] = qp.Qobj(H)
             Hs[i]['channels'] = []
             for j in self.hams[i]:
-                if j > i:
+                if j >= n_qubit:
                     continue
                 omega = 'omegad{}'.format(i)
                 Hs[i]['channels'].append([j, self.ibm_params[omega] * 1e-9 * self.dt, self.ws[j], self.n_funcs])
@@ -480,6 +472,7 @@ class QubitControl(object):
 
             batch_losses = []
             for i in range(len(initial_states)):
+                # print("batch id ", i)
                 psi0 = initials[i]
                 psi1 = targets[i]
                 M = I - psi1 * psi1.dag() 
@@ -513,10 +506,14 @@ class QubitControl(object):
 
         g = np.array([1,0])
         e = np.array([0,1])
-        # pres = ['00', '01', '10', '++']
-        # posts = ['00', '01', '11', '++']
-        initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g)]
-        target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e)]
+        # pres = ['00', '01', '10']
+        # posts = ['00', '01', '11']
+        h_ = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
+
+        initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g), np.kron(h_, h_)]
+        target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e), np.kron(h_, h_)]
+        print("initial_states", initial_states)
+        print("target_states", target_states)
 
         self.train_fidelity(vv0, H0, Hs, initial_states, target_states, num_sample)
         
@@ -596,13 +593,13 @@ class QubitControl(object):
 
 if __name__ == '__main__':
 
-    np.random.seed(0)
-    model = QubitControl(basis='Legendre', n_basis=5 , dt=0.22, duration=96, n_epoch=500, lr = 1e-2)
+    # np.random.seed(0)
+    model = QubitControl(basis='Legendre', n_basis=20 , dt=0.22, duration=1024, n_epoch=500, lr = 1e-2)
     num_sample = 5
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    # model.demo_CNOT(num_sample, 'plain')
-    model.demo_X(num_sample, 'plain')
+    model.demo_CNOT(num_sample, 'plain')
+    # model.demo_X(num_sample, 'plain')
     # model.demo_CNOT(num_sample, 'plain')
