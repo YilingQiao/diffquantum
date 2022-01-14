@@ -6,9 +6,44 @@ import scipy
 import time
 from scipy.special import legendre
 from scipy.stats import unitary_group
+from scipy.sparse.linalg import expm_multiply
+from scipy.sparse import csc_matrix
 
 # qp.mesolve(H, initial_state, t0s)
 # H = [H0, [H1, f1], ...]
+
+def trotter(H_, psi0_, T0, T, n_steps=None):
+    psi = psi0_.full()
+    
+    if n_steps is None:
+        n_steps = int(10 * (T - T0))
+    start = time.time()
+    
+
+    H = []
+    for h in H_:
+        if isinstance(h, list):
+            H.append([csc_matrix(h[0].full()), h[1]])
+        else:
+            H.append(csc_matrix(h.full()))
+
+    
+    dt = (T - T0) / n_steps
+    t = T0
+    
+    for k in range(n_steps):
+        for h in H:
+            if isinstance(h, list):
+                psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
+            else:
+                psi = expm_multiply(-1.j * dt * h, psi)
+        t += dt
+        
+    ans = qp.Qobj(psi)
+
+    return ans
+
+    
 def leapfrog(H_, psi0_, T0, T, n_steps=None):
     psi0 = psi0_.full()
     Re = np.real(psi0)
