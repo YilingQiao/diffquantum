@@ -14,7 +14,7 @@ def leapfrog(H_, psi0_, T0, T, n_steps=None):
     Re = np.real(psi0)
     Im = np.imag(psi0)
     if n_steps is None:
-        n_steps = int(1000 * (T - T0))
+        n_steps = int(250 * (T - T0))
     start = time.time()
     
 
@@ -34,22 +34,22 @@ def leapfrog(H_, psi0_, T0, T, n_steps=None):
         Im_half = Im
         for h in H:
             if isinstance(h, list):
-                Im_half -= 0.5 * dt * h[1](t, None) * h[0] @ Re
+                Im_half -= np.matmul(0.5 * dt * h[1](t, None) * h[0], Re)
             else:
-                Im_half -= 0.5 * dt * h @ Re
+                Im_half -= np.matmul(0.5 * dt * h, Re)
         t += dt/2
         for h in H:
             if isinstance(h, list):
-                Re += dt * h[1](t, None) * h[0] @ Im_half
+                Re += np.matmul(dt * h[1](t, None) * h[0], Im_half)
             else:
-                Re += dt * h @ Im_half
+                Re += np.matmul(dt * h, Im_half)
         Im = Im_half
         t += dt/2
         for h in H:
             if isinstance(h, list):
-                Im -= 0.5 * dt * h[1](t, None) * h[0] @ Re
+                Im -= np.matmul(0.5 * dt * h[1](t, None) * h[0], Re)
             else:
-                Im -= 0.5 * dt * h @ Re
+                Im -= np.matmul(0.5 * dt * h, Re)
     ans = Re + 1.j * Im
     ans = qp.Qobj(ans)
         
@@ -183,7 +183,7 @@ class QubitControl(object):
         return _D
     
     # ( 1 + 3 * n_H * num_sample)  * n_training
-    # 7  * 3
+    # (1 + 3 * 2 * 2 * 5) *
     def get_integrand(self, H0, Hs, M, initial_state, s):
         
         integrand = np.zeros(self.vv.shape)
@@ -472,7 +472,7 @@ class QubitControl(object):
 
             batch_losses = []
             for i in range(len(initial_states)):
-                # print("batch id ", i)
+                print("batch id ", i)
                 psi0 = initials[i]
                 psi1 = targets[i]
                 M = I - psi1 * psi1.dag() 
@@ -484,6 +484,7 @@ class QubitControl(object):
                 optimizer.step()
 
                 batch_losses.append(loss_fidelity.real)
+            print("batch_losses", batch_losses)
 
             batch_losses = np.array(batch_losses).mean()
             print("epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
@@ -491,6 +492,7 @@ class QubitControl(object):
                 batch_losses, 
                 batch_losses
             ))
+            print("self.vv", self.vv)
             self.losses_energy.append(batch_losses) 
             
         return self.vv
@@ -510,8 +512,8 @@ class QubitControl(object):
         # posts = ['00', '01', '11']
         h_ = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
 
-        initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g), np.kron(h_, h_)]
-        target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e), np.kron(h_, h_)]
+        initial_states = [np.kron(g, g), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
+        target_states = [np.kron(g, g), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
         print("initial_states", initial_states)
         print("target_states", target_states)
 
@@ -592,9 +594,8 @@ class QubitControl(object):
     
 
 if __name__ == '__main__':
-
     # np.random.seed(0)
-    model = QubitControl(basis='Legendre', n_basis=20 , dt=0.22, duration=1024, n_epoch=500, lr = 1e-2)
+    model = QubitControl(basis='Legendre', n_basis=8 , dt=0.22, duration=512, n_epoch=500, lr = 1e-2)
     num_sample = 5
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
