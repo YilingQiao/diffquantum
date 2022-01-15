@@ -40,6 +40,7 @@ def trotter(H_, psi0_, T0, T, n_steps=None):
         t += dt
         
     ans = qp.Qobj(psi)
+    # print(T, T0, n_steps, time.time() - start)
 
     return ans
 
@@ -90,7 +91,8 @@ def leapfrog(H_, psi0_, T0, T, n_steps=None):
         
     # print(T, T0, n_steps, time.time() - start)
     return ans
-    
+
+my_solver = trotter 
 
 class QubitControl(object):
     """A class for simulating single-qubit control on quantum hardware.
@@ -250,7 +252,7 @@ class QubitControl(object):
                 ham, self.full_pulse(self.vv.detach().numpy(), Hs[i]['channels'])])
 
         for i in range(1, len(H)):
-            phi = leapfrog(H, initial_state, 0, s)
+            phi = my_solver(H, initial_state, 0, s)
             
             r = 1 / 2
             d = initial_state.shape[0]
@@ -258,12 +260,12 @@ class QubitControl(object):
             gate_m = (qp.qeye(d) - r * 1.j * H[i][0]) / np.sqrt(1. + r**2)
                 
             ts1 = np.linspace(s, self.duration, 10)
-            ket_p = leapfrog(H, gate_p * phi, s, self.duration)
+            ket_p = my_solver(H, gate_p * phi, s, self.duration)
             ps_p = M.matrix_element(ket_p, ket_p)
             if self.is_noisy:
                 ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
                 
-            ket_m = leapfrog(H, gate_m * phi, s, self.duration)
+            ket_m = my_solver(H, gate_m * phi, s, self.duration)
             ps_m = M.matrix_element(ket_m, ket_m)
 
             if self.is_noisy:
@@ -310,7 +312,7 @@ class QubitControl(object):
                 ham, self.full_pulse(self.vv.detach().numpy(), Hs[i]['channels'])])
                 # _H[i], self.full_pulse(self.vv.detach().numpy(), i=i-1)])
 
-        psi_T = leapfrog(H, initial_state, 0, self.duration)
+        psi_T = my_solver(H, initial_state, 0, self.duration)
         return np.real(M.matrix_element(psi_T, psi_T))
     
     
@@ -506,7 +508,9 @@ class QubitControl(object):
                 self.save_plot(epoch)
 
             batch_losses = []
-            for i in range(len(initial_states)):
+            idxs = np.arange(len(initial_states))
+            np.random.shuffle(idxs)
+            for i in idxs:
                 print("batch id ", i)
                 psi0 = initials[i]
                 psi1 = targets[i]
@@ -547,8 +551,8 @@ class QubitControl(object):
         # posts = ['00', '01', '11']
         h_ = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
 
-        initial_states = [np.kron(g, g), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
-        target_states = [np.kron(g, g), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
+        initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
+        target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
         print("initial_states", initial_states)
         print("target_states", target_states)
 
