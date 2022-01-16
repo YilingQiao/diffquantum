@@ -17,6 +17,15 @@ git clone git@github.com:YilingQiao/diffquantum.git
 cd diffquantum
 pip install -r requirements.txt
 ```
+
+### Python binding
+Build the python binding 
+```bash
+git submodule init
+git submodule update
+python setup.py install
+```
+
 ## Demos
 1. Compare with GRAPE on energy minimization. 
 ```bash

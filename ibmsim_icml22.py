@@ -9,90 +9,10 @@ from scipy.stats import unitary_group
 from scipy.sparse.linalg import expm_multiply
 from scipy.sparse import csc_matrix
 
-# qp.mesolve(H, initial_state, t0s)
-# H = [H0, [H1, f1], ...]
+import diffqc as dq 
 
-def trotter(H_, psi0_, T0, T, n_steps=None):
-    psi = psi0_.full()
-    
-    if n_steps is None:
-        n_steps = int(10 * (T - T0))
-    start = time.time()
-    
 
-    H = []
-    for h in H_:
-        if isinstance(h, list):
-            H.append([csc_matrix(h[0].full()), h[1]])
-        else:
-            H.append(csc_matrix(h.full()))
 
-    
-    dt = (T - T0) / n_steps
-    t = T0
-    
-    for k in range(n_steps):
-        for h in H:
-            if isinstance(h, list):
-                psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
-            else:
-                psi = expm_multiply(-1.j * dt * h, psi)
-        t += dt
-        
-    ans = qp.Qobj(psi)
-    # print(T, T0, n_steps, time.time() - start)
-
-    return ans
-
-    
-def leapfrog(H_, psi0_, T0, T, n_steps=None):
-    psi0 = psi0_.full()
-    Re = np.real(psi0)
-    Im = np.imag(psi0)
-    if n_steps is None:
-        n_steps = int(250 * (T - T0))
-    start = time.time()
-    
-
-    H = []
-    for h in H_:
-        if isinstance(h, list):
-            H.append([h[0].full().real, h[1]])
-        else:
-            H.append(h.full().real)
-
-    
-    dt = (T - T0) / n_steps
-    t = T0
-    
-
-    for k in range(n_steps):
-        Im_half = Im
-        for h in H:
-            if isinstance(h, list):
-                Im_half -= np.matmul(0.5 * dt * h[1](t, None) * h[0], Re)
-            else:
-                Im_half -= np.matmul(0.5 * dt * h, Re)
-        t += dt/2
-        for h in H:
-            if isinstance(h, list):
-                Re += np.matmul(dt * h[1](t, None) * h[0], Im_half)
-            else:
-                Re += np.matmul(dt * h, Im_half)
-        Im = Im_half
-        t += dt/2
-        for h in H:
-            if isinstance(h, list):
-                Im -= np.matmul(0.5 * dt * h[1](t, None) * h[0], Re)
-            else:
-                Im -= np.matmul(0.5 * dt * h, Re)
-    ans = Re + 1.j * Im
-    ans = qp.Qobj(ans)
-        
-    # print(T, T0, n_steps, time.time() - start)
-    return ans
-
-my_solver = trotter 
 
 class QubitControl(object):
     """A class for simulating single-qubit control on quantum hardware.
@@ -105,7 +25,8 @@ class QubitControl(object):
     """
     def __init__(self, dt=0.22, duration=96,
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
-                 is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False):
+                 is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False,
+                 per_step=10):
         self.dt = dt
         self.duration = duration
         
@@ -120,6 +41,7 @@ class QubitControl(object):
         self.is_noisy = is_noisy
         self.num_sample = num_sample
         self.is_sample_uniform = is_sample_uniform
+        self.per_step = per_step
 
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
@@ -134,6 +56,10 @@ class QubitControl(object):
                             [1, 0]])
         self.Z = np.array([[1.0 + 0.j, 0], 
                     [0, -1.0]])
+
+        solvers = [self.trotter_cpp, self.leapfrog, self.trotter]
+        self.my_solver = solvers[0]
+        # self.my_solver = trotter 
 
     @staticmethod
     def multi_kron(*args):
@@ -186,6 +112,96 @@ class QubitControl(object):
         psi0 = np.matmul(curr, psi0)
         psi0 = qp.Qobj(psi0)
         return psi0
+
+    def trotter(self, H_, psi0_, T0, T):
+        per_step = self.per_step
+        psi = psi0_.full()
+        
+        n_steps = int(per_step * (T - T0))
+        start = time.time()
+        
+
+        H = []
+        for h in H_:
+            if isinstance(h, list):
+                H.append([csc_matrix(h[0].full()), h[1]])
+            else:
+                H.append(csc_matrix(h.full()))
+
+        
+        dt = (T - T0) / n_steps
+        t = T0
+        
+        for k in range(n_steps):
+            for h in H:
+                if isinstance(h, list):
+                    psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
+                else:
+                    psi = expm_multiply(-1.j * dt * h, psi)
+            t += dt
+            
+        ans = qp.Qobj(psi)
+        # print(T, T0, n_steps, time.time() - start)
+
+        return ans
+
+        
+    def leapfrog(self, H_, psi0_, T0, T):
+        per_step = self.per_step
+        psi0 = psi0_.full()
+        Re = np.real(psi0)
+        Im = np.imag(psi0)
+        
+        n_steps = int(per_step * (T - T0))
+        start = time.time()
+        
+
+        H = []
+        for h in H_:
+            if isinstance(h, list):
+                H.append([h[0].full().real, h[1]])
+            else:
+                H.append(h.full().real)
+
+        
+        dt = (T - T0) / n_steps
+        t = T0
+        
+
+        for k in range(n_steps):
+            Im_half = Im
+            for h in H:
+                if isinstance(h, list):
+                    Im_half -= np.matmul(0.5 * dt * h[1](t, None) * h[0], Re)
+                else:
+                    Im_half -= np.matmul(0.5 * dt * h, Re)
+            t += dt/2
+            for h in H:
+                if isinstance(h, list):
+                    Re += np.matmul(dt * h[1](t, None) * h[0], Im_half)
+                else:
+                    Re += np.matmul(dt * h, Im_half)
+            Im = Im_half
+            t += dt/2
+            for h in H:
+                if isinstance(h, list):
+                    Im -= np.matmul(0.5 * dt * h[1](t, None) * h[0], Re)
+                else:
+                    Im -= np.matmul(0.5 * dt * h, Re)
+        ans = Re + 1.j * Im
+        ans = qp.Qobj(ans)
+            
+        # print(T, T0, n_steps, time.time() - start)
+        return ans
+
+
+    def trotter_cpp(self, H_, psi0_, T0, T):
+        per_step = self.per_step
+        psi0 = psi0_.full()
+        psi = dq.trotter(psi0, T0, T, per_step, self.vv.detach().numpy())
+        psi = np.array(psi).reshape([-1, 1])
+        return qp.Qobj(psi)
+
 
     def full_pulse(self, vv, channels):
         """Generate the full driving pulse for H1 = X
@@ -258,7 +274,7 @@ class QubitControl(object):
                 ham, self.full_pulse(self.vv.detach().numpy(), Hs[i]['channels'])])
 
         for i in range(1, len(H)):
-            phi = my_solver(H, initial_state, 0, s)
+            phi = self.my_solver(H, initial_state, 0, s)
             
             r = 1.
             d = initial_state.shape[0]
@@ -266,12 +282,12 @@ class QubitControl(object):
             gate_m = (qp.qeye(d) - r * 1.j * H[i][0]) / np.sqrt(1. + r**2)
                 
             ts1 = np.linspace(s, self.duration, 10)
-            ket_p = my_solver(H, gate_p * phi, s, self.duration)
+            ket_p = self.my_solver(H, gate_p * phi, s, self.duration)
             ps_p = M.matrix_element(ket_p, ket_p)
             if self.is_noisy:
                 ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
                 
-            ket_m = my_solver(H, gate_m * phi, s, self.duration)
+            ket_m = self.my_solver(H, gate_m * phi, s, self.duration)
             ps_m = M.matrix_element(ket_m, ket_m)
 
             if self.is_noisy:
@@ -332,7 +348,7 @@ class QubitControl(object):
 
         def run_forward_sim(new_coeff):
             H = get_H(new_coeff)
-            phi = my_solver(H, initial_state, 0, self.duration)
+            phi = self.my_solver(H, initial_state, 0, self.duration)
             loss_energy = M.matrix_element(phi, phi)
             if self.is_noisy:
                 loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
@@ -361,7 +377,7 @@ class QubitControl(object):
                 ham, self.full_pulse(self.vv.detach().numpy(), Hs[i]['channels'])])
                 # _H[i], self.full_pulse(self.vv.detach().numpy(), i=i-1)])
 
-        psi_T = my_solver(H, initial_state, 0, self.duration)
+        psi_T = self.my_solver(H, initial_state, 0, self.duration)
         return np.real(M.matrix_element(psi_T, psi_T))
     
     
@@ -450,11 +466,14 @@ class QubitControl(object):
             H0 += (np.matmul(sps[j[0]], sms[j[1]]) + np.matmul(sms[j[0]], sps[j[1]])) * \
             (self.ibm_params[jqq] * 1e-9 * self.dt)
 
+        self._channels = []
+        self._Hs = []
         Hs = {}
         self.n_funcs = 0
         # j, omega, ws, idx
         for i in range(n_qubit):
             H = self.multi_kron(*[self.I if j not in [i] else self.X for j in range(n_qubit)])
+            self._Hs.append(H)
             Hs[i] = {}
             Hs[i]['H'] = qp.Qobj(H)
             Hs[i]['channels'] = []
@@ -464,7 +483,13 @@ class QubitControl(object):
                 omega = 'omegad{}'.format(i)
                 Hs[i]['channels'].append([j, self.ibm_params[omega] * 1e-9 * self.dt, self.ws[j], self.n_funcs])
                 self.n_funcs += 1
+
+            self._channels.append(Hs[i]['channels'])
         print("self.n_funcs", self.n_funcs)
+
+        self._H0 = H0
+        dq.set_H(self._H0, self._Hs, self._channels, self.duration)
+        
         return qp.Qobj(H0), Hs
 
 
@@ -744,7 +769,8 @@ class QubitControl(object):
 if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
-        basis='Legendre', n_basis=16, dt=0.22, duration=256, n_epoch=500, lr = 1e-2, num_sample=6)
+        basis='Legendre', n_basis=16, dt=0.22, 
+        duration=256, n_epoch=512, lr = 5e-3, num_sample=6, per_step=10)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
