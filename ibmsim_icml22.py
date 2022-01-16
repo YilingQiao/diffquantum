@@ -195,10 +195,12 @@ class QubitControl(object):
         return ans
 
 
-    def trotter_cpp(self, H_, psi0_, T0, T):
+    def trotter_cpp(self, H_, psi0_, T0, T, vv=None):
+        if vv is None:
+            vv = self.vv.detach().numpy()
         per_step = self.per_step
         psi0 = psi0_.full()
-        psi = dq.trotter(psi0, T0, T, per_step, self.vv.detach().numpy())
+        psi = dq.trotter(psi0, T0, T, per_step, vv)
         psi = np.array(psi).reshape([-1, 1])
         return qp.Qobj(psi)
 
@@ -333,7 +335,7 @@ class QubitControl(object):
 
 
     def compute_energy_grad_FD(self, H0, Hs, M, initial_state, delta=1e-4):
-        coeff = self.vv.detach().numpy()
+        coeff = self.vv.detach().numpy().copy()
         grad_finite_diff = np.zeros(coeff.shape)
 
         # [2, self.n_funcs ,self.n_basis]
@@ -348,7 +350,7 @@ class QubitControl(object):
 
         def run_forward_sim(new_coeff):
             H = get_H(new_coeff)
-            phi = self.my_solver(H, initial_state, 0, self.duration)
+            phi = self.my_solver(H, initial_state, 0, self.duration, vv=new_coeff)
             loss_energy = M.matrix_element(phi, phi)
             if self.is_noisy:
                 loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
