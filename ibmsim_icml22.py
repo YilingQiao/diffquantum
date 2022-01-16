@@ -105,7 +105,7 @@ class QubitControl(object):
     """
     def __init__(self, dt=0.22, duration=96,
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
-                 is_sample_discrete=False, is_noisy=False):
+                 is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False):
         self.dt = dt
         self.duration = duration
         
@@ -118,6 +118,8 @@ class QubitControl(object):
         self.lr = lr
         self.is_sample_discrete = is_sample_discrete
         self.is_noisy = is_noisy
+        self.num_sample = num_sample
+        self.is_sample_uniform = is_sample_uniform
 
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
@@ -210,9 +212,13 @@ class QubitControl(object):
                 for j in range(self.n_basis):
                     A += coeff_i[0, j] * self.legendre_ps[j](2 * t / self.duration - 1)
                     B += coeff_i[1, j] * self.legendre_ps[j](2 * t / self.duration - 1)
-            
+
                 N = np.sqrt(A**2 + B**2)
-                ans += omega * (2 * scipy.special.expit(N) - 1)/N * (np.cos(w * t) * A + np.sin(w * t) * B)
+
+                if N == 0:
+                    ans += 0
+                else:
+                    ans += omega * (2 * scipy.special.expit(N) - 1)/N * (np.cos(w * t) * A + np.sin(w * t) * B)
 
             return ans
 
@@ -280,9 +286,7 @@ class QubitControl(object):
                 dDdv[:,idx,:] = ps * dDdv[:,idx,:]
         return dDdv
         
-
-
-    def compute_energy_grad_MC(self, H0, Hs, M, initial_state, num_sample):
+    def compute_energy_grad_MC(self, H0, Hs, M, initial_state):
         # (M, H, initial_state, num_sample):
         """Compute the gradient of engergy function <psi(T)|M|psi(T)>, T = duration
         Args:
@@ -293,7 +297,12 @@ class QubitControl(object):
         Returns:
             grad_coeff: (estimated) gradients of the parameters vv.
         """
-        if self.is_sample_discrete == False:
+        num_sample = self.num_sample
+
+        if self.is_sample_uniform:
+            sample_time = [
+            (ss + 1.0) * self.duration / (num_sample + 1) for ss in range(num_sample)]
+        elif self.is_sample_discrete == False:
             sample_time = np.random.uniform(0, self.duration, size=num_sample)
         else: 
             sample_time = 1 + np.random.randint(0, self.duration-1, size=num_sample)
@@ -303,6 +312,44 @@ class QubitControl(object):
             grad += self.get_integrand(H0, Hs, M, initial_state, s)
         
         return torch.from_numpy(self.duration * grad / num_sample)
+
+
+    def compute_energy_grad_FD(self, H0, Hs, M, initial_state, delta=1e-4):
+        coeff = self.vv.detach().numpy()
+        grad_finite_diff = np.zeros(coeff.shape)
+
+        # [2, self.n_funcs ,self.n_basis]
+
+        def get_H(curr_coeff):
+            H = [H0]
+            for i in range(len(Hs.keys())):
+                ham = Hs[i]['H']
+                H.append([
+                    ham, self.full_pulse(curr_coeff, Hs[i]['channels'])])
+            return H
+
+        def run_forward_sim(new_coeff):
+            H = get_H(new_coeff)
+            phi = my_solver(H, initial_state, 0, self.duration)
+            loss_energy = M.matrix_element(phi, phi)
+            if self.is_noisy:
+                loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
+            return loss_energy.real
+
+
+        for i_c in range(2):
+            for i_Hs in range(self.n_funcs):
+                for i_basis in range(self.n_basis):
+                    new_coeff_p = coeff.copy()
+                    new_coeff_p[i_c, i_Hs, i_basis] = coeff[i_c, i_Hs, i_basis] + delta
+                    E_p = run_forward_sim(new_coeff_p)
+                    new_coeff_m = coeff.copy()
+                    new_coeff_m[i_c, i_Hs, i_basis] = coeff[i_c, i_Hs, i_basis] - delta
+                    E_m = run_forward_sim(new_coeff_m)
+                    grad_finite_diff[i_c, i_Hs, i_basis] = (E_p - E_m) / delta / 2.0
+
+        return torch.from_numpy(grad_finite_diff)
+
     
     def compute_energy(self, H0, Hs, M, initial_state):   
         H = [H0]
@@ -434,8 +481,8 @@ class QubitControl(object):
         plt.savefig("{}{}_{}.png".format(self.log_dir, self.log_name, plot_name))
 
         
-        
-    def train_energy(self, M, initial_state, vv0, num_sample):
+
+    def train_energy(self, vv0, H0, Hs, psi0, M):
         """Train the sepctral coefficients to minimize energy minimization.
         Args:
             M: A Hermitian matrix.
@@ -444,31 +491,31 @@ class QubitControl(object):
         Returns:
             vv_final: optimized parameters
         """
-        if len(vv0) != self.n_basis:
-            print("The length of initial guess must be the same as n_basis!")
-        
+ 
         self.vv = torch.tensor(vv0, requires_grad=True)
         
         w_l2 = 0
         lr = self.lr
         optimizer = torch.optim.Adam([self.vv], lr=lr)
+        psi0 = qp.Qobj(psi0)
+        M = qp.Qobj(M)
 
         self.losses_energy = []
         for epoch in range(1, self.n_epoch + 1):
             if epoch % 20 == 0:
                 self.save_plot(epoch)
             
-            loss_energy = self.compute_energy(M, initial_state)
+            loss_energy = self.compute_energy(H0, Hs, M, psi0)
             if self.is_noisy:
                 loss_energy += np.random.normal(scale=np.abs(loss_energy) / 5)
             loss_l2 = ((self.vv**2).mean(0) * torch.tensor(
                 [i**2 for i in range(self.n_basis)])).mean() * w_l2
             loss = loss_energy + loss_l2
             optimizer.zero_grad()
-            loss_l2.backward()
-            grad_vv = self.compute_energy_grad_MC(M, initial_state, num_sample)
+            # loss_l2.backward()
+            grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0)
             self.vv.grad = grad_vv
-            # optimizer.step()
+            optimizer.step()
 
             print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
                 epoch, 
@@ -481,7 +528,7 @@ class QubitControl(object):
             
         return self.vv
             
-    def train_fidelity(self, vv0, H0, Hs, initial_states, target_states, num_sample):
+    def train_fidelity(self, vv0, H0, Hs, initial_states, target_states):
         """Train the sepctral coefficients to minimize energy minimization.
         Args:
             M: A Hermitian matrix.
@@ -517,7 +564,7 @@ class QubitControl(object):
                 M = I - psi1 * psi1.dag() 
                 loss_fidelity = self.compute_energy(H0, Hs, M, psi0)
                 optimizer.zero_grad()
-                grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0, num_sample) 
+                grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0) 
 
                 self.vv.grad = grad_vv
                 optimizer.step()
@@ -536,7 +583,7 @@ class QubitControl(object):
             
         return self.vv
 
-    def demo_CNOT(self, num_sample, method):
+    def demo_CNOT(self, method):
         n_qubit = 2
         self.n_qubit = n_qubit
 
@@ -556,9 +603,45 @@ class QubitControl(object):
         print("initial_states", initial_states)
         print("target_states", target_states)
 
-        self.train_fidelity(vv0, H0, Hs, initial_states, target_states, num_sample)
+        self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
         
-    def demo_X(self, num_sample, method):
+    def demo_FD(self):
+        self.is_sample_uniform = True
+        n_qubit = 1
+        self.n_qubit = n_qubit
+        
+        H0, Hs = self.IBM_H(n_qubit)
+
+        self.n_Hs = len(Hs.keys()) 
+        vv0 =  np.zeros([2 * self.n_basis * self.n_funcs]) + 0.1
+        print(vv0)
+        print(self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+        self.vv = torch.tensor(vv0, requires_grad=True)
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+        initial_states = [1/np.sqrt(2)*e + 1/np.sqrt(2)*g]
+        target_states = [1/np.sqrt(2)*e + 1/np.sqrt(2)*g]
+
+        I = self.multi_kron(*[self.I for j in range(self.n_qubit)])
+        I = qp.Qobj(I)
+        initials = [qp.Qobj(v) for v in initial_states]
+        targets = [qp.Qobj(v) for v in target_states]
+
+        psi0 = initials[0]
+        psi1 = targets[0]
+        M = I - psi1 * psi1.dag() 
+        print("start FD")
+        fd_grad_vv = self.compute_energy_grad_FD(H0, Hs, M, psi0)
+        print("fd_grad_vv", fd_grad_vv)
+        ours_grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0) 
+        print("ours_grad_vv", ours_grad_vv)
+
+        return fd_grad_vv, ours_grad_vv
+
+
+    def demo_X(self, method):
         n_qubit = 1
         self.n_qubit = n_qubit
         
@@ -578,30 +661,54 @@ class QubitControl(object):
         initial_states = [1/np.sqrt(2)*e + 1/np.sqrt(2)*g, g]
         target_states = [1/np.sqrt(2)*e + 1/np.sqrt(2)*g, e]
 
-        self.train_fidelity(vv0, H0, Hs, initial_states, target_states, num_sample)
+        self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
+
+
+    def demo_H2(self):
+        n_qubit = 2
+        self.n_qubit = n_qubit
+        
+        H0, Hs = self.IBM_H(n_qubit)
+
+        self.n_Hs = len(Hs.keys()) 
+        vv0 =  np.random.rand(2 * self.n_basis * self.n_funcs)
+        print(self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+        psi0 = np.kron(g, g)
+
+        M = (-1.052373245772859 * np.kron(self.I, self.I)) + \
+            (0.39793742484318045 * np.kron(self.I, self.Z)) + \
+            (-0.39793742484318045 * np.kron(self.Z, self.I)) + \
+            (-0.01128010425623538 * np.kron(self.Z, self.Z)) + \
+            (0.18093119978423156 * np.kron(self.X, self.X))
+
+        self.train_energy(vv0, H0, Hs, psi0, M)
         
     
-    def model_qubit(self, vv0, num_sample, method):
+    # def model_qubit(self, vv0, num_sample, method):
         
-        I = np.array(
-            [[1, 0], 
-            [0, 1]])
-        X = np.array(
-            [[0, 1], 
-            [1, 0]])
-        Z = np.array(
-            [[1, 0], 
-            [0, -1]])
+    #     I = np.array(
+    #         [[1, 0], 
+    #         [0, 1]])
+    #     X = np.array(
+    #         [[0, 1], 
+    #         [1, 0]])
+    #     Z = np.array(
+    #         [[1, 0], 
+    #         [0, -1]])
         
-        M = qp.Qobj(0.5 * (I + Z))
-        psi0 = qp.basis(2, 0)
+    #     M = qp.Qobj(0.5 * (I + Z))
+    #     psi0 = qp.basis(2, 0)
         
-        if method == 'plain':
-            self.train_energy(M, psi0, vv0, num_sample)
-        elif method == 'rwa':
-            self.train_energy(M, psi0, vv0, num_sample)
-        else:
-            print("Method must be plain or rwa.")
+    #     if method == 'plain':
+    #         self.train_energy(M, psi0, vv0, num_sample)
+    #     elif method == 'rwa':
+    #         self.train_energy(M, psi0, vv0, num_sample)
+    #     else:
+    #         print("Method must be plain or rwa.")
 
     def plot_integrand(self, i, vv0):
         if i > self.n_basis:
@@ -633,13 +740,16 @@ class QubitControl(object):
     
 
 if __name__ == '__main__':
-    # np.random.seed(0)
-    model = QubitControl(basis='Legendre', n_basis=8 , dt=0.22, duration=512, n_epoch=500, lr = 1e-2)
-    num_sample = 5
+    np.random.seed(0)
+    model = QubitControl(
+        basis='Legendre', n_basis=8 , dt=0.22, duration=64, n_epoch=500, lr = 1e-2, num_sample=200)
+  
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    model.demo_CNOT(num_sample, 'plain')
-    # model.demo_X(num_sample, 'plain')
-    # model.demo_CNOT(num_sample, 'plain')
+    # model.demo_CNOT('plain')
+    # model.demo_H2()
+    model.demo_FD()
+    # model.demo_X('plain')
+    # model.demo_CNOT('plain')
