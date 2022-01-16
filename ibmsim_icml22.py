@@ -26,7 +26,7 @@ class QubitControl(object):
     def __init__(self, dt=0.22, duration=96,
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
                  is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False,
-                 per_step=10):
+                 per_step=10, solver=0):
         self.dt = dt
         self.duration = duration
         
@@ -57,8 +57,8 @@ class QubitControl(object):
         self.Z = np.array([[1.0 + 0.j, 0], 
                     [0, -1.0]])
 
-        solvers = [self.trotter_cpp, self.leapfrog, self.trotter]
-        self.my_solver = solvers[0]
+        solvers = [self.trotter_cpp, self.trotter, self.leapfrog]
+        self.my_solver = solvers[solver]
         # self.my_solver = trotter 
 
     @staticmethod
@@ -113,7 +113,7 @@ class QubitControl(object):
         psi0 = qp.Qobj(psi0)
         return psi0
 
-    def trotter(self, H_, psi0_, T0, T):
+    def trotter(self, H_, psi0_, T0, T, **args):
         per_step = self.per_step
         psi = psi0_.full()
         
@@ -146,7 +146,7 @@ class QubitControl(object):
         return ans
 
         
-    def leapfrog(self, H_, psi0_, T0, T):
+    def leapfrog(self, H_, psi0_, T0, T, **args):
         per_step = self.per_step
         psi0 = psi0_.full()
         Re = np.real(psi0)
@@ -772,7 +772,7 @@ if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
         basis='Legendre', n_basis=16, dt=0.22, 
-        duration=256, n_epoch=512, lr = 5e-3, num_sample=6, per_step=10)
+        duration=256, n_epoch=512, lr = 5e-3, num_sample=6, per_step=10, solver=0)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
