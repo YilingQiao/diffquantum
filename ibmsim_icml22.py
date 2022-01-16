@@ -200,12 +200,12 @@ class QubitControl(object):
 
         def _D(t, args):
             # t ranges from [0, duration]
-            A = 0
-            B = 0
             ans = 0
             aa = time.time()
 
             for chan in channels:
+                A = 0
+                B = 0
                 i, omega, w, idx = chan
                 coeff_i = vv[:, idx, :]
 
@@ -744,14 +744,14 @@ class QubitControl(object):
 if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
-        basis='Legendre', n_basis=8 , dt=0.22, duration=64, n_epoch=500, lr = 1e-2, num_sample=200)
+        basis='Legendre', n_basis=16, dt=0.22, duration=256, n_epoch=500, lr = 1e-2, num_sample=6)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
     # model.demo_CNOT('plain')
-    # model.demo_H2()
-    model.demo_FD()
+    model.demo_H2()
+    # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
