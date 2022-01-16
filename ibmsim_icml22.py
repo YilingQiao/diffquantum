@@ -260,7 +260,7 @@ class QubitControl(object):
         for i in range(1, len(H)):
             phi = my_solver(H, initial_state, 0, s)
             
-            r = 1 / 2
+            r = 1.
             d = initial_state.shape[0]
             gate_p = (qp.qeye(d) + r * 1.j * H[i][0]) / np.sqrt(1. + r**2)
             gate_m = (qp.qeye(d) - r * 1.j * H[i][0]) / np.sqrt(1. + r**2)
@@ -308,7 +308,9 @@ class QubitControl(object):
             sample_time = 1 + np.random.randint(0, self.duration-1, size=num_sample)
 
         grad = np.zeros(self.vv.shape)
-        for s in sample_time: 
+        for s in sample_time:
+            if self.vv.grad != None :
+                self.vv.grad.zero_()
             grad += self.get_integrand(H0, Hs, M, initial_state, s)
         
         return torch.from_numpy(self.duration * grad / num_sample)
