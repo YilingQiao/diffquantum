@@ -400,7 +400,6 @@ class QubitControl(object):
           'jq4q5': 12857428.747059302,
           'jq5q6': 13142900.487599919,
           'omegad0': 955111374.7779446,
-          # 'omegad0': 955000000,
           'omegad1': 987150040.8532522,
           'omegad2': 985715793.6078007,
           'omegad3': 978645256.0180163,
@@ -408,7 +407,6 @@ class QubitControl(object):
           'omegad5': 1000100925.8075224,
           'omegad6': 976913592.7775077,
           'wq0': 32901013497.991684,
-          # 'wq0': 32901000000,
           'wq1': 31504959831.439907,
           'wq2': 32092824583.27148,
           'wq3': 32536784568.16119,
@@ -431,8 +429,10 @@ class QubitControl(object):
 
 
         self.hams = {
-            0: [0, 1],
-            1: [1, 0, 3, 2],
+            0: [1],
+            1: [],
+            # 0: [0, 1],
+            # 1: [1, 0, 3, 2],
             2: [2, 1],
             3: [3, 1, 5],
             4: [4, 5],
@@ -580,14 +580,15 @@ class QubitControl(object):
         targets = [qp.Qobj(v) for v in target_states]
 
         for epoch in range(1, self.n_epoch + 1):
+            print("self.vv", self.vv)
             if epoch % 20 == 0:
                 self.save_plot(epoch)
 
             batch_losses = []
             idxs = np.arange(len(initial_states))
             np.random.shuffle(idxs)
+            loss_batch = {}
             for i in idxs:
-                print("batch id ", i)
                 psi0 = initials[i]
                 psi1 = targets[i]
                 M = I - psi1 * psi1.dag() 
@@ -599,7 +600,9 @@ class QubitControl(object):
                 optimizer.step()
 
                 batch_losses.append(loss_fidelity.real)
-            print("batch_losses", batch_losses)
+                loss_batch[i] = loss_fidelity.real
+            print([loss_batch[i] for i in range(len(idxs))])
+            # print("batch_losses", batch_losses)
 
             batch_losses = np.array(batch_losses).mean()
             print("epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
@@ -607,7 +610,7 @@ class QubitControl(object):
                 batch_losses, 
                 batch_losses
             ))
-            print("self.vv", self.vv)
+            
             self.losses_energy.append(batch_losses) 
             
         return self.vv
@@ -619,7 +622,9 @@ class QubitControl(object):
         H0, Hs = self.IBM_H(n_qubit)
         self.n_Hs = len(Hs.keys()) 
         vv0 =  np.random.rand(2 * self.n_basis * self.n_funcs)
+        vv0 =  np.zeros([2 * self.n_basis * self.n_funcs])
         vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+        vv0[0,:,0] = 1
 
         g = np.array([1,0])
         e = np.array([0,1])
@@ -627,8 +632,10 @@ class QubitControl(object):
         # posts = ['00', '01', '11']
         h_ = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
 
-        initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
-        target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
+        initial_states = [np.kron(g, e), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
+        target_states = [np.kron(g, e), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
+        # initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
+        # target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
         print("initial_states", initial_states)
         print("target_states", target_states)
 
@@ -772,14 +779,14 @@ if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
         basis='Legendre', n_basis=16, dt=0.22, 
-        duration=256, n_epoch=512, lr = 5e-3, num_sample=6, per_step=10, solver=0)
+        duration=1024, n_epoch=4000, lr = 5e-2, num_sample=6, per_step=100, solver=0)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    # model.demo_CNOT('plain')
-    model.demo_H2()
+    model.demo_CNOT('plain')
+    # model.demo_H2()
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
