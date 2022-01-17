@@ -4,7 +4,8 @@ project(diffqc)
 set(CMAKE_CXX_STANDARD 17)
 
 add_compile_options(-fPIC)
-add_compile_options(-std=gnu++11)
+add_compile_options(-std=gnu++17)
+add_compile_options(-std=c++17)
 add_compile_options(-Wdeprecated-declarations)
 
 add_definitions(-DSOFTCON_DIR="${CMAKE_HOME_DIRECTORY}")
@@ -24,8 +25,13 @@ add_subdirectory(pybind11)
 pybind11_add_module(diffqc diffqc.cc)
 
 find_package(Eigen3 3.3.3 REQUIRED)
+find_package(Boost REQUIRED)
 if (EIGEN3_FOUND)
    include_directories(${EIGEN3_INCLUDE_DIR})
+endif()
+
+if (Boost_FOUND)
+   include_directories(${Boost_INCLUDE_DIR})
 endif()
 
 target_compile_definitions(diffqc PRIVATE VERSION_INFO=${EXAMPLE_VERSION_INFO})

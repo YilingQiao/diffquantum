@@ -5,10 +5,13 @@
 #include <stdio.h>
 #include <vector>  
 // #include <Eigen/Core>
+// # include <boost/math/tr1.hpp>
+#include <boost/math/special_functions/legendre.hpp>
 #include <unsupported/Eigen/MatrixFunctions>
 #include <math.h>
 #include <cmath>
 
+using namespace std::complex_literals;
 
 // typedef float Scalar;
 // typedef Eigen::MatrixXcf Matrixc;
@@ -95,8 +98,8 @@ Scalar f_u(
 
         for (unsigned int j = 0; j < n_basis; ++j)
         {
-            A += vv[0][idx][j] * std::legendre(j, 2 * t / g_duration - 1);
-            B += vv[1][idx][j] * std::legendre(j, 2 * t / g_duration - 1);
+            A += vv[0][idx][j] * boost::math::legendre_p(j, 2 * t / g_duration - 1);
+            B += vv[1][idx][j] * boost::math::legendre_p(j, 2 * t / g_duration - 1);
         }
         N = std::sqrt(A * A + B * B);
         if (abs(N-0.0) < 0.000001) {
@@ -121,7 +124,8 @@ std::vector<Complex> trotter(
     Scalar dt = (T - T0) / n_steps;
     Scalar t = T0;
 
-    Complex i_unit = 1.i;
+    // std::complex<double> i_unit = cplx(1.i);
+    std::complex<double> i_unit = (1.i);
 
     Vectorc psi0 = Eigen::Map<Vectorc, Eigen::Unaligned>(_psi0.data(), _psi0.size());
     

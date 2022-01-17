@@ -4,11 +4,11 @@ from ibmsim_icml22 import QubitControl
 
 
 model = QubitControl(
-    basis='Legendre', n_basis=8 , dt=0.22, duration=64, num_sample=200, solver=0,
+    basis='Legendre', n_basis=8 , dt=0.22, duration=64, num_sample=10, solver=0,
     per_step=300)
 
 a, b = model.demo_FD()
-
+print("?")
 
 a = a.detach().numpy()
 b = b.detach().numpy()
