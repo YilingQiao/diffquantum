@@ -8,9 +8,9 @@ from scipy.special import legendre
 from scipy.stats import unitary_group
 from scipy.sparse.linalg import expm_multiply
 from scipy.sparse import csc_matrix
+from logger import Logger
 
 import diffqc as dq 
-
 
 
 
@@ -27,10 +27,9 @@ class QubitControl(object):
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
                  is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False,
                  per_step=10, solver=0):
+        args = locals()
         self.dt = dt
         self.duration = duration
-        
-        
         self.n_basis = n_basis
         self.log_dir = "./logs/"
         self.log_name = basis
@@ -57,9 +56,17 @@ class QubitControl(object):
         self.Z = np.array([[1.0 + 0.j, 0], 
                     [0, -1.0]])
 
+
         solvers = [self.trotter_cpp, self.trotter, self.leapfrog]
         self.my_solver = solvers[solver]
-        # self.my_solver = trotter 
+
+        self.logger = Logger()
+        self.logger.write_text("arguments ========")
+        for k, v in args.items():
+            if k == 'self':
+                continue
+            self.logger.write_text("{}: {}".format(k, v))
+
 
     @staticmethod
     def multi_kron(*args):
@@ -429,10 +436,10 @@ class QubitControl(object):
 
 
         self.hams = {
-            0: [1],
-            1: [],
-            # 0: [0, 1],
-            # 1: [1, 0, 3, 2],
+            # 0: [1],
+            # 1: [],
+            0: [0, 1],
+            1: [1, 0, 3, 2],
             2: [2, 1],
             3: [3, 1, 5],
             4: [4, 5],
@@ -487,14 +494,14 @@ class QubitControl(object):
                 self.n_funcs += 1
 
             self._channels.append(Hs[i]['channels'])
-        print("self.n_funcs", self.n_funcs)
+
+        st = "self.n_funcs: {}".format(self.n_funcs)
+        self.logger.write_text(st)
 
         self._H0 = H0
         dq.set_H(self._H0, self._Hs, self._channels, self.duration)
         
         return qp.Qobj(H0), Hs
-
-
 
 
     def save_plot(self, plot_name):
@@ -520,6 +527,7 @@ class QubitControl(object):
         Returns:
             vv_final: optimized parameters
         """
+        self.logger.write_text("!!!! train_energy ========")
  
         self.vv = torch.tensor(vv0, requires_grad=True)
         
@@ -531,6 +539,9 @@ class QubitControl(object):
 
         self.losses_energy = []
         for epoch in range(1, self.n_epoch + 1):
+            st = "vv: {}".format(self.vv)
+            self.logger.write_text_aux(st)
+
             if epoch % 20 == 0:
                 self.save_plot(epoch)
             
@@ -546,11 +557,15 @@ class QubitControl(object):
             self.vv.grad = grad_vv
             optimizer.step()
 
-            print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+            st = "epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
                 epoch, 
                 loss, 
                 loss_energy
-            ))
+            )
+
+            self.logger.write_text(st)
+
+
             self.losses_energy.append(loss_energy.real)
             #self.final_state = final_state
             
@@ -566,6 +581,7 @@ class QubitControl(object):
         Returns:
             vv_final: optimized parameters
         """
+        self.logger.write_text("!!!! train_fidelity ========")
         
         self.vv = torch.tensor(vv0, requires_grad=True)
         w_l2 = 0
@@ -580,7 +596,9 @@ class QubitControl(object):
         targets = [qp.Qobj(v) for v in target_states]
 
         for epoch in range(1, self.n_epoch + 1):
-            print("self.vv", self.vv)
+            st = "vv: {}".format(self.vv)
+            self.logger.write_text_aux(st)
+
             if epoch % 20 == 0:
                 self.save_plot(epoch)
 
@@ -601,21 +619,27 @@ class QubitControl(object):
 
                 batch_losses.append(loss_fidelity.real)
                 loss_batch[i] = loss_fidelity.real
-            print([loss_batch[i] for i in range(len(idxs))])
+
+            st = str([loss_batch[i] for i in range(len(idxs))])
+            self.logger.write_text(st)
             # print("batch_losses", batch_losses)
 
             batch_losses = np.array(batch_losses).mean()
-            print("epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
+
+            st = "epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
                 epoch, 
                 batch_losses, 
                 batch_losses
-            ))
+            )
+
+            self.logger.write_text(st)
             
             self.losses_energy.append(batch_losses) 
             
         return self.vv
 
     def demo_CNOT(self, method):
+        self.logger.write_text("demo_CNOT ========")
         n_qubit = 2
         self.n_qubit = n_qubit
 
@@ -642,6 +666,7 @@ class QubitControl(object):
         self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
         
     def demo_FD(self):
+        self.logger.write_text("demo_FD ========")
         self.is_sample_uniform = True
         n_qubit = 1
         self.n_qubit = n_qubit
@@ -678,6 +703,7 @@ class QubitControl(object):
 
 
     def demo_X(self, method):
+        self.logger.write_text("demo_X ========")
         n_qubit = 1
         self.n_qubit = n_qubit
         
@@ -701,6 +727,7 @@ class QubitControl(object):
 
 
     def demo_H2(self):
+        self.logger.write_text("demo_H2 ========")
         n_qubit = 2
         self.n_qubit = n_qubit
         
@@ -779,14 +806,14 @@ if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
         basis='Legendre', n_basis=16, dt=0.22, 
-        duration=1024, n_epoch=4000, lr = 5e-2, num_sample=6, per_step=100, solver=0)
+        duration=720, n_epoch=4000, lr = 1e-2, num_sample=6, per_step=200, solver=0)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    model.demo_CNOT('plain')
-    # model.demo_H2()
+    # model.demo_CNOT('plain')
+    model.demo_H2()
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
