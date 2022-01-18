@@ -1,3 +1,4 @@
+
 import qutip as qp
 import numpy as np
 import matplotlib.pyplot as plt
@@ -534,6 +535,7 @@ class QubitControl(object):
         w_l2 = 0
         lr = self.lr
         optimizer = torch.optim.Adam([self.vv], lr=lr)
+        # optimizer = torch.optim.SGD([self.vv], lr=lr)
         psi0 = qp.Qobj(psi0)
         M = qp.Qobj(M)
 
@@ -557,7 +559,9 @@ class QubitControl(object):
             self.vv.grad = grad_vv
             optimizer.step()
 
-            st = "epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+            loss_energy = loss_energy - M.eigenenergies()[0]
+
+            st = "epoch: {:04d}, loss: {}, loss_energy: {}".format(
                 epoch, 
                 loss, 
                 loss_energy
