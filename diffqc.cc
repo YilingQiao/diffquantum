@@ -117,7 +117,7 @@ std::vector<Complex> trotter(
     ) {
     
     int n_qubit = _psi0.size();
-    int n_steps = (int) per_step * (T - T0);
+    int n_steps = (int) (per_step * (std::abs(T - T0) + 1));
     Scalar dt = (T - T0) / n_steps;
     Scalar t = T0;
 
