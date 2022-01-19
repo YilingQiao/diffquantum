@@ -26,7 +26,7 @@ class QubitControl(object):
     def __init__(self, dt=0.22, duration=96,
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
                  is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False,
-                 per_step=10, solver=0, detail_log=False):
+                 per_step=10, solver=0, detail_log=False, sampling_measure=False):
         self.dt = dt
         self.duration = duration
         
@@ -43,6 +43,7 @@ class QubitControl(object):
         self.is_sample_uniform = is_sample_uniform
         self.per_step = per_step
         self.detail_log = detail_log
+        self.sampling_measure = sampling_measure
 
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
@@ -118,7 +119,7 @@ class QubitControl(object):
         per_step = self.per_step
         psi = psi0_.full()
         
-        n_steps = int(per_step * (T - T0))
+        n_steps = int(per_step * ((T - T0) + 1))
         start = time.time()
         
 
@@ -136,9 +137,12 @@ class QubitControl(object):
         for k in range(n_steps):
             for h in H:
                 if isinstance(h, list):
-                    psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
+                    dH += -1.j * dt * h[1](t,None) * h[0]
+                    #psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
                 else:
-                    psi = expm_multiply(-1.j * dt * h, psi)
+                    dH = -1.j * dt * h
+                    #psi = expm_multiply(-1.j * dt * h, psi)
+            psi = expm_multiply(dH, psi)
             t += dt
             
         ans = qp.Qobj(psi)
@@ -287,12 +291,18 @@ class QubitControl(object):
                 
             ts1 = np.linspace(s, self.duration, 10)
             ket_p = self.my_solver(H, gate_p * phi, s, self.duration)
-            ps_p = M.matrix_element(ket_p, ket_p)
+            if self.sampling_measure :
+                ps_p = self.stochastic_measure(ket_p)
+            else :
+                ps_p = M.matrix_element(ket_p, ket_p)
             if self.is_noisy:
                 ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
                 
             ket_m = self.my_solver(H, gate_m * phi, s, self.duration)
-            ps_m = M.matrix_element(ket_m, ket_m)
+            if self.sampling_measure :
+                ps_m = self.stochastic_measure(ket_m)
+            else :
+                ps_m = M.matrix_element(ket_m, ket_m)
 
             if self.is_noisy:
                 ps_m += np.random.normal(scale=np.abs(ps_m.real) / 5)
@@ -411,16 +421,18 @@ class QubitControl(object):
         sample_time.sort()
         self.sample_time = sample_time
 
-        self.prefix_suffix(H0, Hs, M, initial_state, sample_time)
+        if not self.sampling_measure :
+            self.prefix_suffix(H0, Hs, M, initial_state, sample_time)
 
         grad = np.zeros(self.vv.shape)
         
         for sidx, s in enumerate(sample_time):
             if self.vv.grad != None :
                 self.vv.grad.zero_()
-            grad += self.get_derivative_presuf(H0, Hs, s, sidx)
-            #grad += self.get_integrand(H0, Hs, M, initial_state, s)
-            #pp = qq
+            if self.sampling_measure :
+                grad += self.get_integrand(H0, Hs, M, initial_state, s)
+            else :
+                grad += self.get_derivative_presuf(H0, Hs, s, sidx)
         
         return torch.from_numpy(self.duration * grad / num_sample)
 
@@ -602,6 +614,7 @@ class QubitControl(object):
 
         h_eig = qp.Qobj(H0).eigenenergies()
         self.ws = [h_eig[2], h_eig[1]]
+        #self.ws = [h_eig[1]]
 
         self._channels = []
         self._Hs = []
@@ -783,6 +796,24 @@ class QubitControl(object):
             
         return self.vv
 
+
+    def stochastic_measure(self, psi, per_Pauli=100) :
+        psi_dag = psi.dag()
+        ans = 0
+        for i in range(len(self.Pauli_M)) :
+            distr = []
+            weight = self.Pauli_M[i][1]
+            evals, estates = self.Pauli_M[i][2]
+            for j in range(len(evals)) :
+                distr.append((psi_dag * estates[j]).norm() ** 2)
+            res = np.random.choice(len(evals), per_Pauli, p = distr)
+            for j in range(len(evals)) :
+                freq = np.count_nonzero(res == j)
+                #print(freq, freq / per_Pauli, distr[j], freq / per_Pauli - distr[j])
+                ans += weight * evals[j] * freq / per_Pauli
+        return ans
+    
+
     def demo_CNOT(self, method):
         n_qubit = 2
         self.n_qubit = n_qubit
@@ -917,6 +948,15 @@ class QubitControl(object):
             (-0.01128010425623538 * np.kron(self.Z, self.Z)) + \
             (0.18093119978423156 * np.kron(self.X, self.X))
 
+        self.Pauli_M = [[np.kron(self.I, self.I), -1.052373245772859],
+                        [np.kron(self.I, self.Z), 0.39793742484318045],
+                        [np.kron(self.Z, self.I), -0.39793742484318045],
+                        [np.kron(self.Z, self.Z), -0.01128010425623538],
+                        [np.kron(self.X, self.X), 0.18093119978423156]]
+
+        for i in range(len(self.Pauli_M)) :
+            self.Pauli_M[i].append(qp.Qobj(self.Pauli_M[i][0]).eigenstates())
+
         self.train_energy(vv0, H0, Hs, psi0, M)
         
     
@@ -998,13 +1038,89 @@ class QubitControl(object):
             self.per_step = ps
             psi1 = self.my_solver(H, psi0, 0, self.duration)
             print(ps, 1-(psi1.dag() * psi1_gt).norm())
-    
+
+
+    def test_IBM_CNOT(self) :
+        n_qubit = 2
+        self.n_qubit = n_qubit
+
+        len_pulse = 1056
+        
+        d0 = []
+        with open('d0_wave', 'r') as f :
+            for i in range(len_pulse) :
+                d0.append(complex(f.readline()))
+        d1 = []
+        with open('d1_wave', 'r') as f :
+            for i in range(len_pulse) :
+                d1.append(complex(f.readline()))
+        u0 = []
+        with open('u0_wave', 'r') as f :
+            for i in range(len_pulse) :
+                u0.append(complex(f.readline()))
+
+        u1 = [0 + 0j for i in range(len_pulse)]
+
+        def to_pulse(waves, channels) :
+            def _D(t, args):
+                ans = 0
+                n_channels = len(channels)
+                for j in range(n_channels) :
+                    C = waves[j][min(int(t), len_pulse - 1)]
+                    A = C.real
+                    B = -C.imag
+                    i, omega, w, idx = channels[j]
+                    #print(C, i, omega, w, idx)
+                    ans += omega * (np.cos(w * t) * A + np.sin(w * t) * B)
+                return ans
+            return _D
+
+        H0, Hs = self.IBM_H(n_qubit)
+        self.n_Hs = len(Hs.keys())
+        
+        H = [H0]
+        H.append([Hs[0]['H'], to_pulse([d0, u0], Hs[0]['channels'])])
+        H.append([Hs[1]['H'], to_pulse([d1, u1], Hs[1]['channels'])])
+        self.H = H
+
+    def test_IBM_X(self) :
+        n_qubit = 1
+        self.n_qubit = n_qubit
+
+        len_pulse = 160
+        
+        d0 = []
+        with open('X_d0_wave', 'r') as f :
+            for i in range(len_pulse) :
+                d0.append(complex(f.readline()))
+
+        def to_pulse(waves, channels) :
+            def _D(t, args):
+                ans = 0
+                n_channels = len(channels)
+                for j in range(n_channels) :
+                    C = waves[j][min(int(t), len_pulse - 1)]
+                    A = C.real
+                    B = -C.imag
+                    i, omega, w, idx = channels[j]
+                    ans += omega * (np.cos(w * t) * A + np.sin(w * t) * B)
+                return ans
+            return _D
+
+        H0, Hs = self.IBM_H(n_qubit)
+        self.n_Hs = len(Hs.keys())
+        
+        H = [H0]
+        H.append([Hs[0]['H'], to_pulse([d0], Hs[0]['channels'])])
+        self.H = H
+        
+        
 
 if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
         basis='Legendre', n_basis=4, dt=0.22222222222, 
-        duration=800, n_epoch=512, lr = 3e-2, num_sample=400, per_step=500, solver=0, detail_log = False)
+        duration=720, n_epoch=512, lr = 3e-2, num_sample=50, per_step=100, solver=0, detail_log = False, sampling_measure=True)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
@@ -1012,8 +1128,10 @@ if __name__ == '__main__':
     # loss0 = model.losses_energy
     # model.demo_CNOT('plain')
     # model.demo_entanglement()
-    # model.demo_H2()
+    model.demo_H2()
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
-    model.test_solver()
+    # model.test_solver()
+    # model.test_IBM_X()
+    # model.test_IBM_CNOT()
