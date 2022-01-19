@@ -969,6 +969,35 @@ class QubitControl(object):
             display(k)
         
         return integrand
+
+    def test_solver(self) :
+        n_qubit = 2
+        self.n_qubit = n_qubit
+
+        H0, Hs = self.IBM_H(n_qubit)
+        self.n_Hs = len(Hs.keys()) 
+        vv0 = np.random.normal(0, 1, 2 * self.n_basis * self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+        self.vv = torch.tensor(vv0, requires_grad = True)
+        
+        H = [H0]
+        for i in range(len(Hs.keys())):
+            ham = Hs[i]['H']
+            H.append([ham, self.full_pulse(self.vv.detach().numpy(), Hs[i]['channels'])])
+        self.H = H
+
+        g = np.array([1,0])
+        psi0 = qp.Qobj(np.kron(g, g))
+
+
+        self.per_step = 10000
+        psi1_gt = self.my_solver(H, psi0, 0, self.duration)
+        
+        psl = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500]
+        for i, ps in enumerate(psl) :
+            self.per_step = ps
+            psi1 = self.my_solver(H, psi0, 0, self.duration)
+            print(ps, 1-(psi1.dag() * psi1_gt).norm())
     
 
 if __name__ == '__main__':
@@ -981,9 +1010,10 @@ if __name__ == '__main__':
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    model.demo_CNOT('plain')
+    # model.demo_CNOT('plain')
     # model.demo_entanglement()
     # model.demo_H2()
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
+    model.test_solver()

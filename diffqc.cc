@@ -108,6 +108,7 @@ Scalar f_u(
     return ans;
 }
 
+/*
 std::vector<Complex> trotter(
     std::vector<Complex>& _psi0,
     Scalar T0,
@@ -140,6 +141,43 @@ std::vector<Complex> trotter(
 
     return out_psi0;
 }
+*/
+
+///*
+std::vector<Complex> trotter(
+    std::vector<Complex>& _psi0,
+    Scalar T0,
+    Scalar T,
+    int per_step,
+    std::vector<std::vector<std::vector<Scalar>>>& vv
+    ) {
+    
+    int n_qubit = _psi0.size();
+    int n_steps = (int) (per_step * (std::abs(T - T0) + 1));
+    Scalar dt = (T - T0) / n_steps;
+    Scalar t = T0;
+
+    Complex i_unit = 1.i;
+
+    Vectorc psi0 = Eigen::Map<Vectorc, Eigen::Unaligned>(_psi0.data(), _psi0.size());
+    
+    for (int step = 0; step < n_steps; ++step)
+    {
+			Matrixc dH = - i_unit * dt * g_H0;
+			for (int h = 0; h < g_Hs.size(); ++h)
+        {
+					Scalar coeff = f_u(h, t, vv);
+					dH += - i_unit * dt * coeff * g_Hs[h];
+				}
+			psi0 = dH.exp() * psi0;
+			t += dt;
+    }
+
+    std::vector<Complex> out_psi0(psi0.data(), psi0.data() + psi0.size());
+
+    return out_psi0;
+}
+//*/
 
 namespace py = pybind11;
 
