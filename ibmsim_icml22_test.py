@@ -10,6 +10,7 @@ from scipy.sparse.linalg import expm_multiply
 from scipy.sparse import csc_matrix
 
 import diffqc as dq 
+from logger import Logger
 
 
 
@@ -27,6 +28,9 @@ class QubitControl(object):
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
                  is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False,
                  per_step=10, solver=0, detail_log=False):
+
+
+        args = locals()
         self.dt = dt
         self.duration = duration
         
@@ -62,6 +66,12 @@ class QubitControl(object):
         self.my_solver = solvers[solver]
         # self.my_solver = trotter 
 
+        self.logger = Logger()
+        self.logger.write_text("arguments ========")
+        for k, v in args.items():
+            if k == 'self':
+                continue
+            self.logger.write_text("{}: {}".format(k, v))
     @staticmethod
     def multi_kron(*args):
         ret = np.array([[1.0]])
@@ -701,6 +711,7 @@ class QubitControl(object):
         Returns:
             vv_final: optimized parameters
         """
+        self.logger.write_text("!!!! train_fidelity ========")
         
         self.vv = torch.tensor(vv0, requires_grad=True)
         w_l2 = 0
@@ -715,6 +726,8 @@ class QubitControl(object):
         targets = [qp.Qobj(v) for v in target_states]
 
         for epoch in range(1, self.n_epoch + 1):
+            st = "{} vv: {}".format(epoch, self.vv)
+            self.logger.write_text_aux(st)
             if epoch % 20 == 0:
                 self.save_plot(epoch)
 
@@ -737,16 +750,27 @@ class QubitControl(object):
 
             self.vv.grad = grad_vv
             optimizer.step()
-            print("losses", losses)
+            # print("losses", losses)
 
             batch_losses = np.array(losses).mean()
-            print("epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
+
+
+            st = "epoch: {:04d}, loss: {}, loss_energy: {}".format(
                 epoch, 
-                batch_losses, 
+                losses, 
                 batch_losses
-            ))
-            if self.detail_log :
-                print("self.vv", self.vv)
+            )
+
+            self.logger.write_text(st)
+
+            # print("epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
+            #     epoch, 
+            #     batch_losses, 
+            #     batch_losses
+            # ))
+            # if self.detail_log :
+            #     print("self.vv", self.vv)
+
             self.losses_energy.append(losses)
             '''
             batch_losses = []
@@ -804,6 +828,34 @@ class QubitControl(object):
 
         initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
         target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
+        print("initial_states", initial_states)
+        print("target_states", target_states)
+
+        self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
+
+
+    def demo_BELL(self, method):
+        self.logger.write_text("demo_BELL ===================")
+        n_qubit = 2
+        self.n_qubit = n_qubit
+
+        H0, Hs = self.IBM_H(n_qubit)
+        self.n_Hs = len(Hs.keys()) 
+        vv0 = np.random.normal(0, 0.02, 2 * self.n_basis * self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+        vv0[:,1,:] *= 30
+        vv0[:,3,:] *= 30
+        #vv0[:,2,:] = 0
+        #vv0[0,2,0] = 8
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+        # pres = ['00', '01', '10']
+        # posts = ['00', '01', '11']
+        h_ = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
+
+        initial_states = [np.kron(g, g)]
+        target_states = [(np.kron(g, g) + np.kron(e, e)) / np.sqrt(2.)]
         print("initial_states", initial_states)
         print("target_states", target_states)
 
@@ -1004,7 +1056,7 @@ if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
         basis='Legendre', n_basis=4, dt=0.22222222222, 
-        duration=800, n_epoch=512, lr = 3e-2, num_sample=400, per_step=500, solver=0, detail_log = False)
+        duration=500, n_epoch=1000, lr = 3e-2, num_sample=400, per_step=200, solver=0, detail_log = False)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
@@ -1016,4 +1068,5 @@ if __name__ == '__main__':
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
-    model.test_solver()
+    model.demo_BELL('plain')
+    # model.test_solver()
