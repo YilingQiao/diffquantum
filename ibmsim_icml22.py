@@ -1,4 +1,3 @@
-
 import qutip as qp
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,8 +26,9 @@ class QubitControl(object):
     def __init__(self, dt=0.22, duration=96,
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
                  is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False,
-                 per_step=10, solver=0):
+                 per_step=10, solver=0, method_name='Ours'):
         args = locals()
+        self.method_name = method_name
         self.dt = dt
         self.duration = duration
         self.n_basis = n_basis
@@ -61,7 +61,7 @@ class QubitControl(object):
         solvers = [self.trotter_cpp, self.trotter, self.leapfrog]
         self.my_solver = solvers[solver]
 
-        self.logger = Logger()
+        self.logger = Logger(name=method_name)
         self.logger.write_text("arguments ========")
         for k, v in args.items():
             if k == 'self':
@@ -342,11 +342,13 @@ class QubitControl(object):
         return torch.from_numpy(self.duration * grad / num_sample)
 
 
-    def compute_energy_grad_FD(self, H0, Hs, M, initial_state, delta=1e-4):
+    def compute_energy_grad_FD(self, H0, Hs, M, initial_state, delta=1e-3):
         coeff = self.vv.detach().numpy().copy()
         grad_finite_diff = np.zeros(coeff.shape)
 
         # [2, self.n_funcs ,self.n_basis]
+        # vv0 =  np.zeros([2 * self.n_basis * self.n_funcs])
+        # vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
 
         def get_H(curr_coeff):
             H = [H0]
@@ -368,6 +370,7 @@ class QubitControl(object):
         for i_c in range(2):
             for i_Hs in range(self.n_funcs):
                 for i_basis in range(self.n_basis):
+                    # print(i_c, i_Hs, i_basis)
                     new_coeff_p = coeff.copy()
                     new_coeff_p[i_c, i_Hs, i_basis] = coeff[i_c, i_Hs, i_basis] + delta
                     E_p = run_forward_sim(new_coeff_p)
@@ -555,7 +558,10 @@ class QubitControl(object):
             loss = loss_energy + loss_l2
             optimizer.zero_grad()
             # loss_l2.backward()
-            grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0)
+            if self.method_name == "Finite-Diff":
+                grad_vv = self.compute_energy_grad_FD(H0, Hs, M, psi0)
+            else:
+                grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0)
             self.vv.grad = grad_vv
             optimizer.step()
 
@@ -809,8 +815,9 @@ class QubitControl(object):
 if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
-        basis='Legendre', n_basis=16, dt=0.22, 
-        duration=720, n_epoch=4000, lr = 1e-2, num_sample=6, per_step=200, solver=0)
+        basis='Legendre', n_basis=8, dt=0.22, 
+        duration=720, n_epoch=4000, lr = 1e-2, num_sample=6, per_step=100, solver=0,
+        method_name="Finite-Diff")
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1

@@ -1,13 +1,17 @@
 from datetime import datetime
 
 class Logger():
-    def __init__(self, path="./logs/"):
+    def __init__(self, name=None, path="./logs/"):
         self.path = path
         now = datetime.now()
-        self.dt_string = now.strftime("%Y%m%d_%H%M%S")
+        self.dt_string = now.strftime("%Y%m%d-%H%M%S")
 
-        self.log_file = '{}text/{}.txt'.format(path, self.dt_string)
-        self.log_file_aux = '{}text/{}_aux.txt'.format(path, self.dt_string)
+        if name == None:
+            name = self.dt_string
+        else:
+            name = '{}_{}'.format(name, self.dt_string)
+        self.log_file = '{}text/{}.txt'.format(path, name)
+        self.log_file_aux = '{}text/{}_aux.txt'.format(path, name)
         print("logs are written to {}".format(self.log_file))
 
     def write_text(self, txt, silent=False):

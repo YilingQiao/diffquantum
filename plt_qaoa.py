@@ -4,8 +4,8 @@ from os import listdir
 from os.path import isfile, join
 from scipy.signal import savgol_filter
 
-n_epoch = 1000
-data_dir = "logs/text/icml22_h2/"
+n_epoch = 200
+data_dir = "logs/text/icml22_qaoa/"
 
 files = [f for f in listdir(data_dir) if isfile(join(data_dir, f))]
 
@@ -36,11 +36,14 @@ for file_name in files:
 
 # plot
 colors = [
-    [0, 0.45, 0.74],
-    [0.85, 0.33, 0.1],
+    [0, 0.4470, 0.7410],
+    [0.8500, 0.3250, 0.0980],
     [0.9290, 0.6940, 0.1250],
     [0.4940, 0.1840, 0.5560],
-    [0.4660, 0.6740, 0.1880]
+    [0.4660, 0.6740, 0.1880],
+    [0.3010, 0.7450, 0.9330],
+    [0.6350, 0.0780, 0.1840]
+
 ]
 
 
@@ -59,15 +62,24 @@ plt.clf()
 xx = np.arange(n_epoch)
 for method, loss_list in methods.items():
     all_losses = np.array(loss_list)
+    print(all_losses.shape)
     mean_ = all_losses.mean(0)
     std_ = all_losses.std(0)
-    if method in ['CMAES', 'SLSQP']:
-        for k in range(5):
-            mean_ = savgol_filter(mean_, 51, 3)
-            std_ = savgol_filter(std_, 51, 3)
-    else:
-        mean_ = savgol_filter(mean_, 51, 3)
-        std_ = savgol_filter(std_, 51, 3)
+    mean_ = savgol_filter(mean_, 51, 3)
+    std_ = savgol_filter(std_, 11, 3)
+    # if method in ['QAOA']:
+    #     mean_ = savgol_filter(mean_, 51, 3)
+    #     std_ = savgol_filter(std_, 51, 3)
+    # else:
+    #     mean_ = savgol_filter(mean_, 51, 3)
+    #     std_ = savgol_filter(std_, 51, 3)
+    # # if method in ['CMAES', 'SLSQP']:
+    # #     for k in range(5):
+    # #         mean_ = savgol_filter(mean_, 51, 3)
+    # #         std_ = savgol_filter(std_, 51, 3)
+    # # else:
+    # #     mean_ = savgol_filter(mean_, 51, 3)
+    # #     std_ = savgol_filter(std_, 51, 3)
     print(method, mean_.shape)
 
     color = colors[i_m]
@@ -82,7 +94,9 @@ for method, loss_list in methods.items():
 plt.legend()
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
-plt.yscale('log')
+# plt.yscale('log')
 plt.grid()
 
+
 plt.savefig("{}{}.png".format(data_dir, __file__.split('.')[0]))
+plt.show()

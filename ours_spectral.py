@@ -5,6 +5,7 @@ import torch
 import scipy 
 from scipy.special import legendre
 from scipy.stats import unitary_group
+from logger import Logger
 
 class OurSpectral(object):
     """A class for using Fourier series to represent the amplitudes.
@@ -12,7 +13,9 @@ class OurSpectral(object):
     Args:
         n_basis: number of Fourier basis.
     """
-    def __init__(self, n_basis=5, basis='Fourier', n_epoch=200, n_step=100, lr=2e-2, is_noisy=False):
+    def __init__(self, n_basis=5, basis='Fourier', n_epoch=200, 
+        n_step=100, lr=2e-2, is_noisy=False, measure_sample_times=1000, method_name='Ours'):
+        args = locals()
         self.n_basis = n_basis
         self.log_dir = "./logs/"
         self.log_name = basis
@@ -23,6 +26,14 @@ class OurSpectral(object):
         self.is_noisy = is_noisy
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
+
+        self.logger = Logger(name=method_name)
+        self.logger.write_text("arguments ========")
+        for k, v in args.items():
+            if k == 'self':
+                continue
+            self.logger.write_text("{}: {}".format(k, v))
+
 
     def generate_u(self, i, spectral_coeff):
         """Generate the function u(i) for H_i
@@ -167,13 +178,15 @@ class OurSpectral(object):
         Returns:
             spectral_coeff: sepctral coefficients.
         """
+        self.logger.write_text("!!!! train_energy ========")
+
         self.n_Hs = len(Hs)
         coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
         # coeff = np.ones([self.n_Hs ,self.n_basis])
         self.spectral_coeff = torch.tensor(coeff, requires_grad=True)
 
         lr = self.lr
-        w_l2 = 0
+        w_l2 = 0.
         I = qp.qeye(2)
         ts = np.linspace(0, 1, self.n_step) 
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
@@ -189,7 +202,7 @@ class OurSpectral(object):
             result = qp.mesolve(H, initial_state, ts)
             final_state = result.states[-1]
 
-            loss_energy = M.matrix_element(final_state, final_state)
+            loss_energy = M.matrix_element(final_state, final_state).real
             if self.is_noisy:
                 loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
             loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
@@ -201,12 +214,23 @@ class OurSpectral(object):
             self.spectral_coeff.grad = grad_coeff
             optimizer.step()
 
-            print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+            loss_energy = loss_energy - M.eigenenergies()[0]
+
+            st = "epoch: {:04d}, loss: {}, loss_energy: {}".format(
                 epoch, 
-                loss.real, 
-                loss_energy.real
-            ))
-            self.losses_energy.append(loss_energy.real)
+                loss, 
+                loss_energy
+            )
+
+            self.logger.write_text(st)
+
+
+            # print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+            #     epoch, 
+            #     loss.real, 
+            #     loss_energy.real
+            # ))
+            self.losses_energy.append(loss_energy)
             self.final_state = final_state
         return self.spectral_coeff
 
@@ -263,6 +287,7 @@ class OurSpectral(object):
         Returns:
             spectral_coeff: sepctral coefficients.
         """
+        self.logger.write_text("!!!! train_energy ========")
         self.n_Hs = len(Hs)
         coeff = np.random.normal(0, 1e-3, [self.n_Hs ,self.n_basis]) 
         # coeff = np.ones([self.n_Hs ,self.n_basis])
@@ -285,7 +310,7 @@ class OurSpectral(object):
             result = qp.mesolve(H, initial_state, ts)
             final_state = result.states[-1]
 
-            loss_energy = M.matrix_element(final_state, final_state)
+            loss_energy = M.matrix_element(final_state, final_state).real
             if self.is_noisy:
                 loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
             loss_l2 = ((self.spectral_coeff**2).mean(0) * torch.tensor(
@@ -298,11 +323,14 @@ class OurSpectral(object):
             self.spectral_coeff.grad = grad_coeff
             optimizer.step()
 
-            print("epoch: {:04d}, loss: {:.4f}, loss_energy: {:.4f}".format(
+            loss_energy = loss_energy - M.eigenenergies()[0]
+
+            st = "epoch: {:04d}, loss: {}, loss_energy: {}".format(
                 epoch, 
-                loss.real, 
-                loss_energy.real
-            ))
+                loss, 
+                loss_energy
+            )
+            self.logger.write_text(st)
             self.losses_energy.append(loss_energy.real)
             self.final_state = final_state
         return self.spectral_coeff
@@ -660,7 +688,7 @@ class OurSpectral(object):
         self.train_fidelity(H0, Hs, psi_in, psi_out)
 
     def demo_learning(self):
-        np.random.seed(0)
+        # np.random.seed(0)
         n_training_size = 8
         n_qubit = 3
         I = np.array([[1, 0], 
@@ -713,6 +741,7 @@ class OurSpectral(object):
         self.train_learning(M, H0, Hs, x, y, n_qubit)
 
     def demo_qaoa_max_cut4(self):
+        self.logger.write_text("Ours ========")
         n_qubit = 4
         graph = [[0, 1], [0, 3], [1, 2], [2, 3]]
         superposition = np.array([0] * 2**n_qubit)
@@ -784,6 +813,71 @@ class OurSpectral(object):
         H0 = qp.Qobj(H0)
         superposition = qp.Qobj(superposition)
         self.train_energy(H_cost, H0, Hs, superposition)
+
+        state, prob = self.find_state(self.final_state)
+        print("cut result is ", bin(state)[2:])
+        return state, prob
+
+    def demo_qaoa_max_cut4_FD(self):
+        self.logger.write_text("Ours FD ========")
+        n_qubit = 4
+        graph = [[0, 1], [0, 3], [1, 2], [2, 3]]
+        superposition = np.array([0] * 2**n_qubit)
+        for i in range(2**n_qubit):
+            z = np.array([0] * 2**n_qubit)
+            z[i] = 1
+            superposition += z
+        superposition = superposition / np.sqrt(2.0**n_qubit)
+
+        Xs = []
+        I = np.array(
+            [[1, 0], 
+            [0, 1]])
+        X = np.array(
+            [[0, 1], 
+            [1, 0]])
+        Z = np.array(
+            [[1, 0], 
+            [0, -1]])
+
+        II = I
+        for i in range(n_qubit - 1):
+            II = np.kron(II, I)
+
+        OO = II * 0.0
+
+        H0 = OO
+        H_cost = OO
+        for e in graph:
+            if 0 in e:
+                curr = Z
+            else:
+                curr = I
+            for i in range(1, n_qubit):
+                if i in e:
+                    curr = np.kron(curr, Z)
+                else:
+                    curr = np.kron(curr, I)
+            H_cost += II - curr
+        H_cost = - H_cost * 0.5
+
+
+        Hs = []
+        # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
+        for e in graph:
+            H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
+            Hs.append(H)
+
+        for i in range(n_qubit):
+            H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
+            Hs.append(H)
+
+        Hs = [qp.Qobj(H) for H in Hs]
+
+        H_cost = qp.Qobj(H_cost)
+        H0 = qp.Qobj(H0)
+        superposition = qp.Qobj(superposition)
+        self.train_energy_FD(H_cost, H0, Hs, superposition)
 
         state, prob = self.find_state(self.final_state)
         print("cut result is ", bin(state)[2:])
@@ -985,13 +1079,24 @@ class OurSpectral(object):
         self.train_energy(M, H0, Hs, psi0)
 
 if __name__ == '__main__':
-    ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=200)
+
+    n_repeat = 5
+    for i in range(n_repeat):
+        ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Finite-Diff")
+        ours_spectral.demo_qaoa_max_cut4_FD()
+
+        
+        ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Ours")
+        ours_spectral.demo_qaoa_max_cut4()
+
+
     # ours_spectral.demo_finite_diff(n_samples=50, delta=1e-5, is_MC=False)
     # ours_spectral = ours_spectral.demo_learning()
     # ours_spectral = ours_spectral.demo_gate_synthesis()
     # ours_spectral.demo_fidelity()
     # ours_spectral.demo_TIM()
-    ours_spectral.demo_qaoa_max_cut4()
+    # ours_spectral.demo_qaoa_max_cut4()
+    
     # ours_spectral.demo_energy_qubit2()
     # ours_spectral.demo_gate_synthesis()
     # ours_spectral.demo_energy_qubit1()
