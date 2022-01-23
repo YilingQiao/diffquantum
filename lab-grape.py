@@ -293,7 +293,7 @@ class Grape_lab(object):
     
     
     def ibm_X(self, duration):
-        """synthesizing the plus state on the IBM machine
+        """synthesizing the X gate on the IBM machine
         """
         self.logger.write_text("ibm_X========")
 
@@ -384,7 +384,7 @@ class Grape_lab(object):
     def ibm_CNOT(self, duration):
         """synthesizing the CNOT gate on the IBM machine
         """
-        self.logger.write_text("ibm_bell_state_lab ========")
+        self.logger.write_text("ibm_CNOT_lab ========")
 
         n_step = self.n_step
         T = duration * 0.22
