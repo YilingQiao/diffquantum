@@ -1,4 +1,4 @@
-from ours_spectral import OurSpectral
+from ours_nomod_qaoa import OurSpectral
 import qutip as qp
 import numpy as np
 import torch

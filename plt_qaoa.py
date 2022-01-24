@@ -5,7 +5,7 @@ from os.path import isfile, join
 from scipy.signal import savgol_filter
 
 n_epoch = 200
-data_dir = "logs/text/icml22_qaoa/"
+data_dir = "logs/text/icml22_qaoa_ablation/"
 
 files = [f for f in listdir(data_dir) if isfile(join(data_dir, f))]
 

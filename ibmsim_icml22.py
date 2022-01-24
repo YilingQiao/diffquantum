@@ -26,7 +26,7 @@ class QubitControl(object):
     def __init__(self, dt=0.22, duration=96,
                  n_basis=5, basis='Legendre', n_epoch=200, lr=1e-2, 
                  is_sample_discrete=False, is_noisy=False, num_sample=1, is_sample_uniform=False,
-                 per_step=10, solver=0, method_name='Ours'):
+                 per_step=10, solver=0, method_name='Ours', sampling_measure=False):
         args = locals()
         self.method_name = method_name
         self.dt = dt
@@ -42,6 +42,7 @@ class QubitControl(object):
         self.num_sample = num_sample
         self.is_sample_uniform = is_sample_uniform
         self.per_step = per_step
+        self.sampling_measure = sampling_measure
 
         if basis == 'Legendre':
             self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
@@ -121,11 +122,28 @@ class QubitControl(object):
         psi0 = qp.Qobj(psi0)
         return psi0
 
+    def stochastic_measure(self, psi, per_Pauli=100) :
+        psi_dag = psi.dag()
+        ans = 0
+        for i in range(len(self.Pauli_M)) :
+            distr = []
+            weight = self.Pauli_M[i][1]
+            evals, estates = self.Pauli_M[i][2]
+            for j in range(len(evals)) :
+                distr.append((psi_dag * estates[j]).norm() ** 2)
+            res = np.random.choice(len(evals), per_Pauli, p = distr)
+            for j in range(len(evals)) :
+                freq = np.count_nonzero(res == j)
+                #print(freq, freq / per_Pauli, distr[j], freq / per_Pauli - distr[j])
+                ans += weight * evals[j] * freq / per_Pauli
+        return ans
+
+
     def trotter(self, H_, psi0_, T0, T, **args):
         per_step = self.per_step
         psi = psi0_.full()
         
-        n_steps = int(per_step * (T - T0))
+        n_steps = int(per_step * ((T - T0) + 1))
         start = time.time()
         
 
@@ -143,9 +161,12 @@ class QubitControl(object):
         for k in range(n_steps):
             for h in H:
                 if isinstance(h, list):
-                    psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
+                    # psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
+                    dH += -1.j * dt * h[1](t,None) * h[0]
                 else:
-                    psi = expm_multiply(-1.j * dt * h, psi)
+                    # psi = expm_multiply(-1.j * dt * h, psi)
+                    dH = -1.j * dt * h
+            psi = expm_multiply(dH, psi)
             t += dt
             
         ans = qp.Qobj(psi)
@@ -293,12 +314,23 @@ class QubitControl(object):
                 
             ts1 = np.linspace(s, self.duration, 10)
             ket_p = self.my_solver(H, gate_p * phi, s, self.duration)
-            ps_p = M.matrix_element(ket_p, ket_p)
+            # ps_p = M.matrix_element(ket_p, ket_p)
+
+            if self.sampling_measure :
+                ps_p = self.stochastic_measure(ket_p)
+            else :
+                ps_p = M.matrix_element(ket_p, ket_p)
+
             if self.is_noisy:
                 ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
                 
             ket_m = self.my_solver(H, gate_m * phi, s, self.duration)
-            ps_m = M.matrix_element(ket_m, ket_m)
+            # ps_m = M.matrix_element(ket_m, ket_m)
+
+            if self.sampling_measure :
+                ps_m = self.stochastic_measure(ket_m)
+            else :
+                ps_m = M.matrix_element(ket_m, ket_m)
 
             if self.is_noisy:
                 ps_m += np.random.normal(scale=np.abs(ps_m.real) / 5)
@@ -361,7 +393,12 @@ class QubitControl(object):
         def run_forward_sim(new_coeff):
             H = get_H(new_coeff)
             phi = self.my_solver(H, initial_state, 0, self.duration, vv=new_coeff)
-            loss_energy = M.matrix_element(phi, phi)
+
+            if self.sampling_measure :
+                loss_energy = self.stochastic_measure(phi)
+            else :
+                loss_energy = M.matrix_element(phi, phi)
+
             if self.is_noisy:
                 loss_energy += np.random.normal(scale=np.abs(loss_energy.real) / 5)
             return loss_energy.real
@@ -760,28 +797,67 @@ class QubitControl(object):
 
         self.train_energy(vv0, H0, Hs, psi0, M)
         
+    def demo_H2_measure(self):
+        self.logger.write_text("demo_H2 ========")
+        n_qubit = 2
+        self.n_qubit = n_qubit
+        
+        H0, Hs = self.IBM_H(n_qubit)
+
+        self.n_Hs = len(Hs.keys()) 
+        vv0 =  np.random.rand(2 * self.n_basis * self.n_funcs)
+        print(self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+        psi0 = np.kron(g, g)
+
+        M = (-1.052373245772859 * np.kron(self.I, self.I)) + \
+            (0.39793742484318045 * np.kron(self.I, self.Z)) + \
+            (-0.39793742484318045 * np.kron(self.Z, self.I)) + \
+            (-0.01128010425623538 * np.kron(self.Z, self.Z)) + \
+            (0.18093119978423156 * np.kron(self.X, self.X))
+
+        self.Pauli_M = [[np.kron(self.I, self.I), -1.052373245772859],
+            [np.kron(self.I, self.Z), 0.39793742484318045],
+            [np.kron(self.Z, self.I), -0.39793742484318045],
+            [np.kron(self.Z, self.Z), -0.01128010425623538],
+            [np.kron(self.X, self.X), 0.18093119978423156]]
+
+        for i in range(len(self.Pauli_M)) :
+            self.Pauli_M[i].append(qp.Qobj(self.Pauli_M[i][0]).eigenstates())
+
+        self.train_energy(vv0, H0, Hs, psi0, M)
+        
     
-    # def model_qubit(self, vv0, num_sample, method):
-        
-    #     I = np.array(
-    #         [[1, 0], 
-    #         [0, 1]])
-    #     X = np.array(
-    #         [[0, 1], 
-    #         [1, 0]])
-    #     Z = np.array(
-    #         [[1, 0], 
-    #         [0, -1]])
-        
-    #     M = qp.Qobj(0.5 * (I + Z))
-    #     psi0 = qp.basis(2, 0)
-        
-    #     if method == 'plain':
-    #         self.train_energy(M, psi0, vv0, num_sample)
-    #     elif method == 'rwa':
-    #         self.train_energy(M, psi0, vv0, num_sample)
-    #     else:
-    #         print("Method must be plain or rwa.")
+    def demo_BELL(self, method):
+        self.logger.write_text("demo_BELL ========")
+        n_qubit = 2
+        self.n_qubit = n_qubit
+
+        H0, Hs = self.IBM_H(n_qubit)
+        self.n_Hs = len(Hs.keys()) 
+        vv0 = np.random.normal(0, 1, 2 * self.n_basis * self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+        # vv0[:,1,:] *= 30
+        # vv0[:,3,:] *= 30
+        #vv0[:,2,:] = 0
+        #vv0[0,2,0] = 8
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+        # pres = ['00', '01', '10']
+        # posts = ['00', '01', '11']
+        h_ = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
+
+        initial_states = [np.kron(g, g)]
+        target_states = [(np.kron(g, g) + np.kron(e, e)) / np.sqrt(2.)]
+        print("initial_states", initial_states)
+        print("target_states", target_states)
+
+        self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
+
 
     def plot_integrand(self, i, vv0):
         if i > self.n_basis:
@@ -813,18 +889,39 @@ class QubitControl(object):
     
 
 if __name__ == '__main__':
-    np.random.seed(0)
-    model = QubitControl(
-        basis='Legendre', n_basis=8, dt=0.22, 
-        duration=720, n_epoch=4000, lr = 1e-2, num_sample=6, per_step=100, solver=0,
-        method_name="Finite-Diff")
+    # np.random.seed(0)
+
+    # for i in range(3):
+
+    #     model = QubitControl(
+    #         basis='Legendre', n_basis=8, dt=0.22, 
+    #         duration=720, n_epoch=1000, lr = 1e-2, num_sample=6, per_step=100, solver=0,
+    #         method_name="Finite-Diff", sampling_measure=True)
+    #     model.demo_H2_measure()
+
+    for i in range(4):
+        model = QubitControl(
+            basis='Legendre', n_basis=8, dt=0.22, 
+            duration=720, n_epoch=1000, lr = 1e-2, num_sample=6, per_step=100, solver=0,
+            sampling_measure=True)
+
+        model.demo_H2_measure()
+
+        
+    # model = QubitControl(
+    #     basis='Legendre', n_basis=8, dt=0.22, 
+    #     duration=720, n_epoch=4000, lr = 1e-2, num_sample=6, per_step=100, solver=0,
+    #     method_name="Ours", sampling_measure=True)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
     # model.demo_CNOT('plain')
-    model.demo_H2()
+    # model.demo_BELL('plain')
+    # model.demo_BELL('plain')
+
+    # model.demo_H2()
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')

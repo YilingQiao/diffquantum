@@ -4,9 +4,10 @@ from os import listdir
 from os.path import isfile, join
 from scipy.signal import savgol_filter
 
-n_epoch = 1000
-data_dir = "logs/text/icml22_h2/"
+n_epoch = 800
+data_dir = "logs/text/icml22_h2_ablation/"
 
+# data_dir = "logs/text/icml22_h2/"
 files = [f for f in listdir(data_dir) if isfile(join(data_dir, f))]
 
 methods = {}
@@ -61,13 +62,13 @@ for method, loss_list in methods.items():
     all_losses = np.array(loss_list)
     mean_ = all_losses.mean(0)
     std_ = all_losses.std(0)
-    if method in ['CMAES', 'SLSQP']:
-        for k in range(5):
-            mean_ = savgol_filter(mean_, 51, 3)
-            std_ = savgol_filter(std_, 51, 3)
-    else:
-        mean_ = savgol_filter(mean_, 51, 3)
-        std_ = savgol_filter(std_, 51, 3)
+    # if method in ['CMAES', 'SLSQP']:
+    #     for k in range(5):
+    #         mean_ = savgol_filter(mean_, 51, 3)
+    #         std_ = savgol_filter(std_, 51, 3)
+    # else:
+    mean_ = savgol_filter(mean_, 51, 3)
+    std_ = savgol_filter(std_, 51, 3)
     print(method, mean_.shape)
 
     color = colors[i_m]
@@ -82,7 +83,8 @@ for method, loss_list in methods.items():
 plt.legend()
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
-plt.yscale('log')
+# plt.yscale('log')
 plt.grid()
 
 plt.savefig("{}{}.png".format(data_dir, __file__.split('.')[0]))
+plt.show()
