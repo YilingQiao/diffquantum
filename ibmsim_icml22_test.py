@@ -808,6 +808,7 @@ class QubitControl(object):
         return self.vv
 
     def demo_CNOT(self, method):
+        self.logger.write_text("demo_CNOT ===================")
         n_qubit = 2
         self.n_qubit = n_qubit
 
@@ -1053,10 +1054,14 @@ class QubitControl(object):
     
 
 if __name__ == '__main__':
-    np.random.seed(0)
-    model = QubitControl(
-        basis='Legendre', n_basis=4, dt=0.22222222222, 
-        duration=500, n_epoch=1000, lr = 3e-2, num_sample=400, per_step=200, solver=0, detail_log = False)
+    # np.random.seed(0)
+    num_repeat = 3
+    for i in range(num_repeat):
+        model = QubitControl(
+            basis='Legendre', n_basis=4, dt=0.22222222222, 
+            duration=1056, n_epoch=1200, lr = 1e-2, num_sample=400, per_step=200, solver=0, detail_log = False)
+        # model.demo_BELL('plain')
+        model.demo_CNOT('plain')
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
@@ -1068,5 +1073,4 @@ if __name__ == '__main__':
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
-    model.demo_BELL('plain')
     # model.test_solver()

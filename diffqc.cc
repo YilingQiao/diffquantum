@@ -169,7 +169,7 @@ std::vector<Complex> trotter(
 					Scalar coeff = f_u(h, t, vv);
 					dH += - i_unit * dt * coeff * g_Hs[h];
 				}
-			psi0 = dH.exp() * psi0;
+			psi0 = dH.exp() * psi0; 
 			t += dt;
     }
 
