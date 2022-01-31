@@ -1,7 +1,9 @@
 import pennylane as qml
 from pennylane import numpy as np
-
-np.random.seed(42)
+import numpy as np
+from logger import Logger
+import torch
+# np.random.seed(42)
 
 ##############################################################################
 # Operators
@@ -59,7 +61,7 @@ dev = qml.device("default.qubit", wires=n_wires, shots=1)
 # (repeated applications of :math:`U_BU_C`) using the keyword ``n_layers``.
 
 pauli_z = [[1, 0], [0, -1]]
-pauli_z_2 = np.kron(pauli_z, pauli_z, requires_grad=False)
+pauli_z_2 = np.kron(pauli_z, pauli_z)
 
 
 @qml.qnode(dev)
@@ -99,7 +101,7 @@ def qaoa_maxcut(steps=10, n_layers=1):
     print("\np={:d}".format(n_layers))
 
     # initialize the parameters near zero
-    init_params = 0.01 * np.random.rand(2, n_layers, requires_grad=True)
+    init_params = 0.01 * np.random.rand(2, n_layers)
 
     # minimize the negative of the objective function
     def objective(params):
@@ -122,17 +124,29 @@ def qaoa_maxcut(steps=10, n_layers=1):
         params = opt.step(objective, params)
         loss = -objective(params)
         losses.append(-loss)
-        if (i + 1) % 5 == 0:
-            print("Objective after step {:5d}: {: .7f}".format(i + 1, -loss))
+        # if (i + 1) % 5 == 0:
+        #     print("Objective after step {:5d}: {: .7f}".format(i + 1, -loss))
 
     # sample measured bitstrings 100 times
     bit_strings = []
-    n_samples = 100
+    n_samples = 10000
+
+    # print(losses)
+    final_losses = []
+    with torch.no_grad():
+        for i in range(0, n_samples):
+            # print(loss)
+            loss = -objective(params)
+            final_losses.append(-loss)
+    print(np.array(final_losses).mean() + 4)
+    exit()
     
     for i in range(0, n_samples):
         circuit_result = circuit(params[0], params[1], edge=None, n_layers=n_layers)
+        print(circuit_result)
         bitstring = bitstring_to_int(circuit_result)
         bit_strings.append(bitstring)
+        exit()
 
     # print optimal parameters and most frequently sampled bitstring
 
@@ -143,7 +157,8 @@ def qaoa_maxcut(steps=10, n_layers=1):
 
     return -objective(params), bit_strings, losses
 
-if __name__ == '__main__':
+def main():
+
     # perform qaoa on our graph with p=1,2 and
     # keep the bitstring sample lists
     bitstrings1 = qaoa_maxcut(n_layers=1)[1]
@@ -181,3 +196,31 @@ if __name__ == '__main__':
     plt.hist(bitstrings2, bins=bins)
     plt.tight_layout()
     plt.show()
+
+def icml22_submit():
+    log = Logger(name='Circuit')
+    log.write_text("!!!! QAOA ========")
+    n_layers = 2
+    n_gate_run = 20
+    n_epoch = 200
+    losses = []
+    for i in range(n_gate_run):
+        _, bit_strings, loss = qaoa_maxcut(n_epoch, n_layers=n_layers)
+        losses.append(loss)
+    np_loss = np.array(losses) + 4.
+    mean_ = np_loss.mean(0)
+    for i in range(len(mean_)):
+        st = "epoch: {:04d}, loss: {}, loss_energy: {}".format(
+            i, 
+            mean_[i], 
+            mean_[i]
+        )
+
+        log.write_text(st)
+
+
+
+if __name__ == '__main__':
+    for i in range(5):
+        icml22_submit()
+

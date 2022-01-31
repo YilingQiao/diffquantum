@@ -5,7 +5,11 @@ import torch
 import scipy 
 from scipy.special import legendre
 from scipy.stats import unitary_group
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import expm_multiply
 from logger import Logger
+import time
+import math
 
 class OurSpectral(object):
     """A class for using Fourier series to represent the amplitudes.
@@ -15,7 +19,7 @@ class OurSpectral(object):
     """
     def __init__(self, n_basis=5, basis='Fourier', n_epoch=200, 
         n_step=100, lr=2e-2, is_noisy=False, measure_sample_times=1000, 
-        method_name='Ours', sampling_measure=False):
+        method_name='Ours', sampling_measure=False, per_step=10):
         args = locals()
         self.n_basis = n_basis
         self.log_dir = "./logs/"
@@ -36,8 +40,13 @@ class OurSpectral(object):
             if k == 'self':
                 continue
             self.logger.write_text("{}: {}".format(k, v))
+        self.per_step = per_step
+        self.my_solver = self.trotter
 
 
+    def sigmoid(self, x):
+        return 1 / (1 + math.exp(-x))
+      
     def generate_u(self, i, spectral_coeff):
         """Generate the function u(i) for H_i
         Args:
@@ -45,6 +54,7 @@ class OurSpectral(object):
         Returns:
             _u: function u_i(t).
         """
+        sgm = torch.nn.Sigmoid()
         def _u(t, args):
             coeff_i = spectral_coeff[i]
             u = 0
@@ -53,12 +63,82 @@ class OurSpectral(object):
                 if self.basis == 'poly':
                     u += coeff_i[j] * (t - 0.5)**j
                 elif self.basis == 'Legendre':
-                    u += coeff_i[j] * self.legendre_ps[j](2 * t - 1)
+                    u += coeff_i[j] * self.legendre_ps[j](2 * t / self.T - 1)
                 elif self.basis == 'Fourier':
                     u += coeff_i[j] * np.cos(2 * np.pi * j * t) \
                         + coeff_i[j + n] * np.sin(2 * np.pi * j * t) 
-            return u
+
+            sigmoid_u = self.sigmoid(u) * 2 - 1
+            # print(u, sigmoid_u)
+            return sigmoid_u * self.omegas[i]
         return _u
+
+    def stochastic_measure(self, psi, per_Pauli=100) :
+        psi_dag = psi.dag()
+        ans = 0
+        for i in range(len(self.Pauli_M)) :
+            distr = []
+            weight = self.Pauli_M[i][1]
+            evals, estates = self.Pauli_M[i][2]
+            for j in range(len(evals)) :
+                distr.append((psi_dag * estates[j]).norm() ** 2)
+
+            # print(sum(distr))
+            res = np.random.choice(len(evals), per_Pauli, p = distr)
+            for j in range(len(evals)) :
+                freq = np.count_nonzero(res == j)
+                #print(freq, freq / per_Pauli, distr[j], freq / per_Pauli - distr[j])
+                ans += weight * evals[j] * freq / per_Pauli
+        return ans
+
+    def trotter(self, H_, psi0_, T0, T, **args):
+        # print("enter trotter")
+        per_step = self.per_step
+        psi = psi0_.full()
+        
+        n_steps = int(per_step * ((T - T0) + 1))
+        start = time.time()
+
+        # H = H_
+        H = []
+        for h in H_:
+            if isinstance(h, list):
+                H.append([h[0].full(), h[1]])
+            else:
+                H.append(h.full())
+
+        # H = []
+        # for h in H_:
+        #     if isinstance(h, list):
+        #         H.append([csc_matrix(h[0].full()), h[1]])
+        #     else:
+        #         H.append(csc_matrix(h.full()))
+
+        
+        dt = (T - T0) / n_steps
+        t = T0
+        for k in range(n_steps):
+
+            # start_ = time.time()
+            for h in H:
+                if isinstance(h, list):
+                    # psi = expm_multiply(-1.j * dt * h[1](t,None) * h[0], psi)
+                    dH += -1.j * dt * h[1](t,None) * h[0]
+                else:
+                    # psi = expm_multiply(-1.j * dt * h, psi)
+                    dH = -1.j * dt * h
+            # print(time.time() - start_)
+            expm = scipy.linalg.expm(dH)
+            psi = np.matmul(expm , psi)
+            # psi = expm_multiply(dH, psi)
+            scipy.linalg.expm
+            dH = dH * 0
+            t += dt
+            
+        ans = qp.Qobj(psi)
+        # print(T, T0, n_steps, time.time() - start)
+
+        return ans
 
     def sample_multiple_times(self, M, H, initial_state, n_samples=100, is_MC=True):
         grads_coeffs = []
@@ -96,7 +176,7 @@ class OurSpectral(object):
                     if self.basis == 'poly':
                         grad_coeff[i][j] = (s-0.5)**j * ps
                     elif self.basis == 'Legendre':
-                        pj = legendre(j)
+                        pj = self.legendre_ps[j]
                         grad_coeff[i][j] = pj(2 * s - 1) * ps
                     elif self.basis == 'Fourier':
                         grad_coeff[i][j] = ps * np.cos(2 * np.pi * j * s) 
@@ -117,11 +197,25 @@ class OurSpectral(object):
         """
         # self.sample_multiple_times(M, H, initial_state)
 
+        s = np.random.uniform() * self.T
+
+        sgm = torch.nn.Sigmoid()
+        for i in range(self.n_Hs):
+            legendre_A = [self.spectral_coeff[i,j] * self.legendre_ps[j](2 * s / self.T - 1) for j in range(self.n_basis)]
+            A = sum(legendre_A)
+            # Ds = A
+            Ds = (sgm(A) * 2. - 1) * self.omegas[i] 
+            Ds.backward()
+
+        dDdv = self.spectral_coeff.grad.detach().numpy().copy()
+        self.spectral_coeff.grad.zero_()
+
+
         grad_coeff = np.zeros(self.spectral_coeff.shape)
-        s = np.random.uniform()
         t0s = np.linspace(0, s, self.n_step)
-        result = qp.mesolve(H, initial_state, t0s)
-        phi = result.states[-1]
+        # phi = qp.mesolve(H, initial_state, t0s)
+        phi = self.my_solver(H, initial_state, 0, s)
+        # phi = result.states[-1]
         
         ts1 = np.linspace(s, 1, self.n_step)
         r = 1 / 2
@@ -132,8 +226,12 @@ class OurSpectral(object):
             gate_m = (qp.qeye(d) - r * 1.j * H[i+1][0]) / np.sqrt(1. + r**2)
 
             
-            result = qp.mesolve(H, gate_p * phi, ts1)
-            ket_p = result.states[-1]
+            # result = qp.mesolve(H, gate_p * phi, ts1)
+            ket_p = self.my_solver(H, gate_p * phi, s, self.T)
+            # print("norm gate_p * phi", np.linalg.norm((gate_p * phi).full()))
+            # print("norm ket_p", np.linalg.norm(ket_p.full()))
+
+            # ket_p = result.states[-1]
             # ps_p = M.matrix_element(ket_p, ket_p)
 
             if self.sampling_measure :
@@ -144,8 +242,10 @@ class OurSpectral(object):
             if self.is_noisy:
                 ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
 
-            result = qp.mesolve(H, gate_m * phi, ts1)
-            ket_m = result.states[-1]
+            # result = qp.mesolve(H, gate_m * phi, ts1)
+            ket_m = self.my_solver(H, gate_m * phi, s, self.T)
+            # result = self.my_solver(H, gate_m * phi, s, self.T)
+            # ket_m = result.states[-1]
             # ps_m = M.matrix_element(ket_m, ket_m)
 
             if self.sampling_measure :
@@ -164,7 +264,7 @@ class OurSpectral(object):
                     grad_coeff[i][j] = (s-0.5)**j * ps
                 elif self.basis == 'Legendre':
                     pj = legendre(j)
-                    grad_coeff[i][j] = pj(2 * s - 1) * ps
+                    grad_coeff[i][j] = ps * dDdv[i, j]
                 elif self.basis == 'Fourier':
                     grad_coeff[i][j] = ps * np.cos(2 * np.pi * j * s) 
                     grad_coeff[i][j + n] =  ps * np.sin(2 * np.pi * j * s) 
@@ -173,7 +273,7 @@ class OurSpectral(object):
     def save_plot(self, plot_name):
         return
         ts = np.linspace(0, 1, self.n_step) 
-        fs = [self.generate_u(i, self.spectral_coeff.detach().numpy()) for i in range(self.n_Hs)]
+        fs = [self.generate_u(i, self.spectral_coeff.detach().numpy().copy()) for i in range(self.n_Hs)]
         np_us = np.array([[f(x, None) for f in fs] for x in ts])
         plt.clf()
         for j in range(len(fs)):
@@ -203,7 +303,7 @@ class OurSpectral(object):
         lr = self.lr
         w_l2 = 0.
         I = qp.qeye(2)
-        ts = np.linspace(0, 1, self.n_step) 
+        ts = np.linspace(0, self.T, 2)
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
 
         self.losses_energy = []
@@ -212,10 +312,11 @@ class OurSpectral(object):
                 self.save_plot(epoch)
             H = [H0]
             for i in range(self.n_Hs):
-                H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy())])
+                H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy().copy())])
 
-            result = qp.mesolve(H, initial_state, ts)
-            final_state = result.states[-1]
+            # result = qp.mesolve(H, initial_state, ts)
+            final_state = self.my_solver(H, initial_state, 0, self.T)
+            # final_state = result.states[-1]
 
             # loss_energy = M.matrix_element(final_state, final_state).real
             if self.sampling_measure :
@@ -332,7 +433,7 @@ class OurSpectral(object):
                 self.save_plot(epoch)
             H = [H0]
             for i in range(self.n_Hs):
-                H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy())])
+                H.append([Hs[i], self.generate_u(i, self.spectral_coeff.detach().numpy().copy())])
 
             result = qp.mesolve(H, initial_state, ts)
             final_state = result.states[-1]
@@ -798,18 +899,15 @@ class OurSpectral(object):
         H0 = OO
         # H1 = OO
         H_cost = OO
-        # for i in range(n_qubit):
-        #     if i == 0:
-        #         curr = X
-        #     else:
-        #         curr = I
-        #     for j in range(1, n_qubit):
-        #         if j == i:
-        #             curr = np.kron(curr, X)
-        #         else:
-        #             curr = np.kron(curr, I)
-        #     H1 = H1 + curr
 
+        omega0 = 1 * np.pi
+        omega1 = 1 * np.pi
+        n_layers = 1
+        # self.T = 3
+        self.T = np.pi * (1. / omega0 + 1. / omega1) * n_layers
+        self.logger.write_text("self.T: {}".format(self.T))
+
+        self.Pauli_M = []
         for e in graph:
             if 0 in e:
                 curr = Z
@@ -820,19 +918,28 @@ class OurSpectral(object):
                     curr = np.kron(curr, Z)
                 else:
                     curr = np.kron(curr, I)
+
+            self.Pauli_M.append([curr, 0.5])
             H_cost += II - curr
         H_cost = - H_cost * 0.5
+        self.Pauli_M.append([II, -0.5 * len(graph)])
 
+        for i in range(len(self.Pauli_M)) :
+            self.Pauli_M[i].append(qp.Qobj(self.Pauli_M[i][0]).eigenstates())
+        # M ------------
 
         Hs = []
+        self.omegas = []
         # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
         for e in graph:
             H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
             Hs.append(H)
+            self.omegas.append(omega0)
 
         for i in range(n_qubit):
             H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
             Hs.append(H)
+            self.omegas.append(omega1)
 
         Hs = [qp.Qobj(H) for H in Hs]
 
@@ -874,7 +981,17 @@ class OurSpectral(object):
         OO = II * 0.0
 
         H0 = OO
+        # H1 = OO
         H_cost = OO
+
+        omega0 = 1 * np.pi
+        omega1 = 1 * np.pi
+        n_layers = 1
+        # self.T = 3
+        self.T = 2 * np.pi * (1. / omega0 + 1. / omega1) * n_layers
+        print("self.T: ", self.T)
+
+        self.Pauli_M = []
         for e in graph:
             if 0 in e:
                 curr = Z
@@ -885,19 +1002,28 @@ class OurSpectral(object):
                     curr = np.kron(curr, Z)
                 else:
                     curr = np.kron(curr, I)
+
+            self.Pauli_M.append([curr, 0.5])
             H_cost += II - curr
         H_cost = - H_cost * 0.5
+        self.Pauli_M.append([II, -0.5 * len(graph)])
 
+        for i in range(len(self.Pauli_M)) :
+            self.Pauli_M[i].append(qp.Qobj(self.Pauli_M[i][0]).eigenstates())
+        # M ------------
 
         Hs = []
+        self.omegas = []
         # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
         for e in graph:
             H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
             Hs.append(H)
+            self.omegas.append(omega0)
 
         for i in range(n_qubit):
             H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
             Hs.append(H)
+            self.omegas.append(omega1)
 
         Hs = [qp.Qobj(H) for H in Hs]
 
@@ -1107,14 +1233,23 @@ class OurSpectral(object):
 
 if __name__ == '__main__':
 
-    n_repeat = 2
+    # n_repeat = 2
+    # for i in range(n_repeat):
+    #     ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=False)
+    #     ours_spectral.demo_qaoa_max_cut4()
+    #     ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=False)
+    #     ours_spectral.demo_qaoa_max_cut4_FD()
+
+
+
+    n_repeat = 3
     for i in range(n_repeat):
-        ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
-        ours_spectral.demo_qaoa_max_cut4_FD()
+        ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=False)
+        ours_spectral.demo_qaoa_max_cut4()
+        # ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
+        # ours_spectral.demo_qaoa_max_cut4_FD()
 
         
-        ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=True)
-        ours_spectral.demo_qaoa_max_cut4()
 
 
     # ours_spectral.demo_finite_diff(n_samples=50, delta=1e-5, is_MC=False)
