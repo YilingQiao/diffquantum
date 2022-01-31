@@ -72,6 +72,9 @@ class SimEnv:
         self.model.logger.write_text(st)
 
         self.n_step += 1
+
+        if self.n_step == 405:
+            exit()
         return loss_energy
 
 def train_cmaes():
@@ -83,7 +86,7 @@ def train_cmaes():
     est_init_state = np.ones([env.n_vv]) * 0.001
     optim_loss = 0.
 
-
+    n_step = 0
     opts = cma.CMAOptions()
     opts.set('tolfun', optim_loss)
     opts.set('bounds', [state_lower_bounds, state_upper_bounds])
@@ -96,6 +99,9 @@ def train_cmaes():
         es.tell(solutions, [env.run_with_psi0(x) for x in solutions])
         es.logger.add()
         es.disp()
+        if n_step == 405:
+            exit()
+        n_step += 1
         if es.result.fbest < optim_loss:
             est_init_state = es.result.xbest
             break
@@ -118,6 +124,8 @@ def train_SLSQP():
 
 
 if __name__ == '__main__':
-    # train_cmaes()
+    # num_repeat = 3
+    # for i in range(num_repeat):
+    train_cmaes()
     # train_SLSQP()
-    train_nelder_mead()
+    # train_nelder_mead()

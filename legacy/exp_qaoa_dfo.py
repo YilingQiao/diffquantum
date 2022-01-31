@@ -1,4 +1,4 @@
-from ours_spectral import OurSpectral
+from ours_nomod_qaoa import OurSpectral
 import qutip as qp
 import numpy as np
 import torch
@@ -46,7 +46,17 @@ class SimEnv:
         OO = II * 0.0
 
         H0 = OO
+        # H1 = OO
         H_cost = OO
+
+        omega0 = 1 * np.pi
+        omega1 = 1 * np.pi
+        n_layers = 1
+        # self.T = 3
+        self.model.T = 2 * np.pi * (1. / omega0 + 1. / omega1) * n_layers
+        print("self.T: ", self.model.T)
+
+        self.model.Pauli_M = []
         for e in graph:
             if 0 in e:
                 curr = Z
@@ -57,19 +67,28 @@ class SimEnv:
                     curr = np.kron(curr, Z)
                 else:
                     curr = np.kron(curr, I)
+
+            self.model.Pauli_M.append([curr, 0.5])
             H_cost += II - curr
         H_cost = - H_cost * 0.5
+        self.model.Pauli_M.append([II, -0.5 * len(graph)])
 
+        for i in range(len(self.model.Pauli_M)) :
+            self.model.Pauli_M[i].append(qp.Qobj(self.model.Pauli_M[i][0]).eigenstates())
+        # M ------------
 
         Hs = []
+        self.model.omegas = []
         # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
         for e in graph:
             H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
             Hs.append(H)
+            self.model.omegas.append(omega0)
 
         for i in range(n_qubit):
             H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
             Hs.append(H)
+            self.model.omegas.append(omega1)
 
         Hs = [qp.Qobj(H) for H in Hs]
 
@@ -112,8 +131,8 @@ class SimEnv:
             loss_energy
         )
         self.model.logger.write_text(st)
-        # if self.n_step > 205:
-        #     exit()
+        if self.n_step > 205:
+            exit()
         self.n_step += 1
         return loss_energy
 
@@ -163,14 +182,13 @@ def train_SLSQP():
     n_qubit = env.n_qubit
     # coeff = np.random.normal(0, 1e-3, [self.n_Hs  *self.n_basis]) 
     est_init_state = np.random.normal(0, 1e-3, [env.n_Hs * env.n_basis]) 
-    scipy.optimize.minimize(env.run_with_coeff, est_init_state, method=DFO_Method,
-        options={'maxiter': 5})
+    scipy.optimize.minimize(env.run_with_coeff, est_init_state, method=DFO_Method)
     
 
 
 if __name__ == '__main__':
-    n_repeat = 5
-    for i in range(n_repeat):
-        train_cmaes()
-        train_SLSQP()
-        train_nelder_mead()
+    # n_repeat = 5
+    # for i in range(n_repeat):
+    train_SLSQP()
+    # train_cmaes()
+    # train_nelder_mead()
