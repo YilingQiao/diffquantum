@@ -895,19 +895,23 @@ if __name__ == '__main__':
 
     #     model = QubitControl(
     #         basis='Legendre', n_basis=8, dt=0.22, 
-    #         duration=720, n_epoch=1000, lr = 1e-2, num_sample=6, per_step=100, solver=0,
+    #         duration=720, n_epoch=200, lr = 1e-2, num_sample=6, per_step=100, solver=0,
     #         method_name="Finite-Diff", sampling_measure=True)
     #     model.demo_H2_measure()
 
-    for i in range(4):
+    for i in range(3):
         model = QubitControl(
             basis='Legendre', n_basis=8, dt=0.22, 
-            duration=720, n_epoch=1000, lr = 1e-2, num_sample=6, per_step=100, solver=0,
-            sampling_measure=True)
+            duration=720, n_epoch=200, lr = 1e-2, num_sample=6, per_step=100, solver=0, 
+            method_name="Finite-Diff", sampling_measure=True)
+        # model = QubitControl(
+        #     basis='Legendre', n_basis=8, dt=0.22, 
+        #     duration=720, n_epoch=200, lr = 1e-2, num_sample=6, per_step=100, solver=0, 
+        #     method_name="Ours", sampling_measure=False)
 
         model.demo_H2_measure()
 
-        
+
     # model = QubitControl(
     #     basis='Legendre', n_basis=8, dt=0.22, 
     #     duration=720, n_epoch=4000, lr = 1e-2, num_sample=6, per_step=100, solver=0,

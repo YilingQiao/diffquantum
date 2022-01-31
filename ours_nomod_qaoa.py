@@ -70,7 +70,7 @@ class OurSpectral(object):
 
             sigmoid_u = self.sigmoid(u) * 2 - 1
             # print(u, sigmoid_u)
-            return sigmoid_u
+            return sigmoid_u * self.omegas[i]
         return _u
 
     def stochastic_measure(self, psi, per_Pauli=100) :
@@ -83,7 +83,7 @@ class OurSpectral(object):
             for j in range(len(evals)) :
                 distr.append((psi_dag * estates[j]).norm() ** 2)
 
-            print(sum(distr))
+            # print(sum(distr))
             res = np.random.choice(len(evals), per_Pauli, p = distr)
             for j in range(len(evals)) :
                 freq = np.count_nonzero(res == j)
@@ -204,7 +204,7 @@ class OurSpectral(object):
             legendre_A = [self.spectral_coeff[i,j] * self.legendre_ps[j](2 * s / self.T - 1) for j in range(self.n_basis)]
             A = sum(legendre_A)
             # Ds = A
-            Ds = sgm(A) * 2. - 1 
+            Ds = (sgm(A) * 2. - 1) * self.omegas[i] 
             Ds.backward()
 
         dDdv = self.spectral_coeff.grad.detach().numpy().copy()
@@ -228,6 +228,8 @@ class OurSpectral(object):
             
             # result = qp.mesolve(H, gate_p * phi, ts1)
             ket_p = self.my_solver(H, gate_p * phi, s, self.T)
+            # print("norm gate_p * phi", np.linalg.norm((gate_p * phi).full()))
+            # print("norm ket_p", np.linalg.norm(ket_p.full()))
 
             # ket_p = result.states[-1]
             # ps_p = M.matrix_element(ket_p, ket_p)
@@ -902,8 +904,8 @@ class OurSpectral(object):
         omega1 = 1 * np.pi
         n_layers = 1
         # self.T = 3
-        self.T = 2 * np.pi * (1. / omega0 + 1. / omega1) * n_layers
-        print("self.T: ", self.T)
+        self.T = np.pi * (1. / omega0 + 1. / omega1) * n_layers
+        self.logger.write_text("self.T: {}".format(self.T))
 
         self.Pauli_M = []
         for e in graph:
@@ -927,16 +929,17 @@ class OurSpectral(object):
         # M ------------
 
         Hs = []
+        self.omegas = []
         # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
         for e in graph:
             H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
-            H = (II - H) * omega0
             Hs.append(H)
+            self.omegas.append(omega0)
 
         for i in range(n_qubit):
             H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
-            H = H * omega1
             Hs.append(H)
+            self.omegas.append(omega1)
 
         Hs = [qp.Qobj(H) for H in Hs]
 
@@ -1010,16 +1013,17 @@ class OurSpectral(object):
         # M ------------
 
         Hs = []
+        self.omegas = []
         # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
         for e in graph:
             H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
-            H = (II - H) * omega0
             Hs.append(H)
+            self.omegas.append(omega0)
 
         for i in range(n_qubit):
             H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
-            H = H * omega1
             Hs.append(H)
+            self.omegas.append(omega1)
 
         Hs = [qp.Qobj(H) for H in Hs]
 
@@ -1238,12 +1242,12 @@ if __name__ == '__main__':
 
 
 
-    n_repeat = 2
+    n_repeat = 3
     for i in range(n_repeat):
-        ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=True)
+        ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=False)
         ours_spectral.demo_qaoa_max_cut4()
-        ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
-        ours_spectral.demo_qaoa_max_cut4_FD()
+        # ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
+        # ours_spectral.demo_qaoa_max_cut4_FD()
 
         
 

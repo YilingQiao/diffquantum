@@ -2,6 +2,7 @@ import pennylane as qml
 from pennylane import numpy as np
 import numpy as np
 from logger import Logger
+import torch
 # np.random.seed(42)
 
 ##############################################################################
@@ -128,12 +129,24 @@ def qaoa_maxcut(steps=10, n_layers=1):
 
     # sample measured bitstrings 100 times
     bit_strings = []
-    n_samples = 100
+    n_samples = 10000
+
+    # print(losses)
+    final_losses = []
+    with torch.no_grad():
+        for i in range(0, n_samples):
+            # print(loss)
+            loss = -objective(params)
+            final_losses.append(-loss)
+    print(np.array(final_losses).mean() + 4)
+    exit()
     
     for i in range(0, n_samples):
         circuit_result = circuit(params[0], params[1], edge=None, n_layers=n_layers)
+        print(circuit_result)
         bitstring = bitstring_to_int(circuit_result)
         bit_strings.append(bitstring)
+        exit()
 
     # print optimal parameters and most frequently sampled bitstring
 
@@ -185,7 +198,7 @@ def main():
     plt.show()
 
 def icml22_submit():
-    log = Logger(name='QAOA')
+    log = Logger(name='Circuit')
     log.write_text("!!!! QAOA ========")
     n_layers = 2
     n_gate_run = 20
