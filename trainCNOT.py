@@ -13,7 +13,6 @@ from qiskit.tools.monitor import job_monitor
 import warnings
 warnings.filterwarnings('ignore')
 
-
 def normC(x, y) :
     l = np.sqrt(x ** 2 + y ** 2)
     coef = (2 * expit(l) - 1) / l
@@ -43,7 +42,7 @@ def dvalue(n, vR, vI, T, t, dL_dR, dL_dI) :
     derivR, derivI = [], []
     for j in range(n) :
         derivR.append((dL_dR * dR_dr + dL_dI * dI_dr) * legendre(j)(2. * t / T - 1))
-        derivI.append((dL_dR * dR_di + dL_dI * dR_di) * legendre(j)(2. * t / T - 1))
+        derivI.append((dL_dR * dR_di + dL_dR * dR_di) * legendre(j)(2. * t / T - 1))
     return np.array(derivR), np.array(derivI)
 
 def dL_dv(n, vR, vI, T, t, omega_dt, dL_du) :
@@ -322,7 +321,7 @@ class OursPulse(object):
         self.train_energy()
 
 if __name__ == '__main__':
-    op = OursPulse(basis='Legendre', n_basis=12, n_epoch=15, n_qubit=2, T=496, pulse_simulation = False, load_checkpoint = False)
+    op = OursPulse(basis='Legendre', n_basis=12, n_epoch=15, n_qubit=2, T=496, pulse_simulation = True, load_checkpoint = False)
     '''
     , init_param = (np.array([[[-2.7550e-02,  3.9761e-01], \
          [-3.5656e-02,  4.5210e-02], \
@@ -330,6 +329,6 @@ if __name__ == '__main__':
          [ 7.2024e-02,  7.0554e-03], \
          [ 4.3864e-02, -3.7871e-05]]]), np.array([-0.5586])))
     '''
-    op.demo_X()
+    #op.demo_X()
     
 
