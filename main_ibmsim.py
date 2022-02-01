@@ -720,8 +720,7 @@ class QubitControl(object):
 
         for epoch in range(1, self.n_epoch + 1):
             st = "vv: {}".format(self.vv)
-            if epoch % 20 == 0:
-                self.save_plot(epoch)
+            self.logger.write_text_aux(st)
 
             idxs = np.arange(len(initial_states))
             losses = []
@@ -779,8 +778,8 @@ class QubitControl(object):
         self.n_Hs = len(Hs.keys()) 
         vv0 = np.random.normal(0, 0.02, 2 * self.n_basis * self.n_funcs)
         vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
-        # vv0[:,1,:] *= 30
-        # vv0[:,3,:] *= 30
+        vv0[:,1,:] *= 30
+        vv0[:,3,:] *= 30
         #vv0[:,2,:] = 0
         #vv0[0,2,0] = 8
 
