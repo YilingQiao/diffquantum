@@ -43,10 +43,34 @@ class OurSpectral(object):
         self.per_step = per_step
         self.my_solver = self.trotter
 
+        if basis == 'BSpline':
+            self.get_func_bspline() 
+
 
     def sigmoid(self, x):
         return 1 / (1 + math.exp(-x))
-      
+
+    def get_func_bspline(self):
+        tau = 1. / (self.n_basis - 2)
+        tau_bs = [tau * (b - 1.5) for b in range(self.n_basis)]
+
+        norm_factor = - (1.5 * tau) ** 2 
+        
+        def get_bspline_b(b):
+            l = tau_bs[b] - 1.5 * tau
+            r = tau_bs[b] + 1.5 * tau
+            def bspline_b(t):
+                if t >= r or t <= l:
+                    ans = 0.0
+                else:
+                    ans = (t - l) * (t - r) / norm_factor
+                return ans
+
+            return bspline_b
+
+        self.func_bsplines = [get_bspline_b(b) for b in range(self.n_basis)] 
+
+
     def generate_u(self, i, spectral_coeff):
         """Generate the function u(i) for H_i
         Args:
@@ -67,6 +91,8 @@ class OurSpectral(object):
                 elif self.basis == 'Fourier':
                     u += coeff_i[j] * np.cos(2 * np.pi * j * t) \
                         + coeff_i[j + n] * np.sin(2 * np.pi * j * t) 
+                elif self.basis == 'BSpline':
+                    u += coeff_i[j] * self.func_bsplines[j](t / self.T)
 
             sigmoid_u = self.sigmoid(u) * 2 - 1
             # print(u, sigmoid_u)
@@ -140,51 +166,6 @@ class OurSpectral(object):
 
         return ans
 
-    def sample_multiple_times(self, M, H, initial_state, n_samples=100, is_MC=True):
-        grads_coeffs = []
-        for ss in range(n_samples):
-            grad_coeff = np.zeros(self.spectral_coeff.shape)
-            s = np.random.uniform() if is_MC else (ss + 1) * 1.0 / (n_samples + 1)
-            t0s = np.linspace(0, s, self.n_step)
-            result = qp.mesolve(H, initial_state, t0s)
-            phi = result.states[-1]
-
-            ts1 = np.linspace(s, 1, self.n_step)
-            r = 2
-
-            for i in range(self.n_Hs):
-                d = initial_state.shape[0]
-                gate_p = (qp.qeye(d) + r * 1.j * H[i+1][0]) / np.sqrt(1. + r**2)
-                gate_m = (qp.qeye(d) - r * 1.j * H[i+1][0]) / np.sqrt(1. + r**2)
-
-                result = qp.mesolve(H, gate_p * phi, ts1)
-                ket_p = result.states[-1]
-                ps_p = M.matrix_element(ket_p, ket_p)
-                if self.is_noisy:
-                    ps_p += np.random.normal(scale=np.abs(ps_p.real) / 5)
-
-                result = qp.mesolve(H, gate_m * phi, ts1)
-                ket_m = result.states[-1]
-                ps_m = M.matrix_element(ket_m, ket_m)
-                if self.is_noisy:
-                    ps_m += np.random.normal(scale=np.abs(ps_m.real) / 5)
-
-                ps = ( (1 + r**2) / 2 / r * (ps_m - ps_p)).real
-                
-                n = int(self.n_basis / 2) if self.basis == 'Fourier' else self.n_basis 
-                for j in range(n):
-                    if self.basis == 'poly':
-                        grad_coeff[i][j] = (s-0.5)**j * ps
-                    elif self.basis == 'Legendre':
-                        pj = self.legendre_ps[j]
-                        grad_coeff[i][j] = pj(2 * s - 1) * ps
-                    elif self.basis == 'Fourier':
-                        grad_coeff[i][j] = ps * np.cos(2 * np.pi * j * s) 
-                        grad_coeff[i][j + n] =  ps * np.sin(2 * np.pi * j * s) 
-
-            grads_coeffs.append(grad_coeff)
-
-        return np.array(grads_coeffs)
 
     def compute_energy_grad_MC(self, M, H, initial_state, coeff=1.0):
         """Compute the gradient of engergy function <psi(1)|M|psi(1)>
@@ -201,8 +182,14 @@ class OurSpectral(object):
 
         sgm = torch.nn.Sigmoid()
         for i in range(self.n_Hs):
-            legendre_A = [self.spectral_coeff[i,j] * self.legendre_ps[j](2 * s / self.T - 1) for j in range(self.n_basis)]
-            A = sum(legendre_A)
+            if self.basis == 'Legendre':
+                coeff_A = [self.spectral_coeff[i,j] * self.legendre_ps[j](2 * s / self.T - 1) \
+                                for j in range(self.n_basis)]
+            elif self.basis == 'BSpline':
+                coeff_A = [self.spectral_coeff[i,j] * self.func_bsplines[j](s / self.T) \
+                                for j in range(self.n_basis)]
+
+            A = sum(coeff_A)
             # Ds = A
             Ds = (sgm(A) * 2. - 1) * self.omegas[i] 
             Ds.backward()
@@ -262,8 +249,7 @@ class OurSpectral(object):
             for j in range(n):
                 if self.basis == 'poly':
                     grad_coeff[i][j] = (s-0.5)**j * ps
-                elif self.basis == 'Legendre':
-                    pj = legendre(j)
+                elif self.basis in ['Legendre', 'BSpline']:
                     grad_coeff[i][j] = ps * dDdv[i, j]
                 elif self.basis == 'Fourier':
                     grad_coeff[i][j] = ps * np.cos(2 * np.pi * j * s) 
@@ -1233,25 +1219,15 @@ class OurSpectral(object):
 
 if __name__ == '__main__':
 
-    # n_repeat = 2
-    # for i in range(n_repeat):
-    #     ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=False)
-    #     ours_spectral.demo_qaoa_max_cut4()
-    #     ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=False)
-    #     ours_spectral.demo_qaoa_max_cut4_FD()
+    np.random.seed(0)
+    # ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, 
+    #     n_epoch=202,method_name="Ours", sampling_measure=False)
+    ours_spectral = OurSpectral(basis='BSpline', lr=2e-2, n_basis=6, 
+        n_epoch=202,method_name="Ours", sampling_measure=False)
+    ours_spectral.demo_qaoa_max_cut4()
 
-
-
-    n_repeat = 3
-    for i in range(n_repeat):
-        ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=False)
-        ours_spectral.demo_qaoa_max_cut4()
-        # ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
-        # ours_spectral.demo_qaoa_max_cut4_FD()
-
-        
-
-
+    # ours_spectral = OurSpectral(basis='Legendre', lr=2e-2, n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
+    # ours_spectral.demo_qaoa_max_cut4_FD()
     # ours_spectral.demo_finite_diff(n_samples=50, delta=1e-5, is_MC=False)
     # ours_spectral = ours_spectral.demo_learning()
     # ours_spectral = ours_spectral.demo_gate_synthesis()
