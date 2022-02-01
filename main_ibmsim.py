@@ -405,7 +405,7 @@ class QubitControl(object):
                 Ds = omega * (2 * sgm(N) - 1)/N *(np.cos(w * s) * A + np.sin(w * s) * B)
                 Ds.backward()
 
-        dDdv = self.vv.grad.detach().numpy()
+        dDdv = self.vv.grad.detach().numpy().copy()
 
         for i in range(self.n_qubit):
             phi = self.prefix[sidx]
@@ -427,6 +427,9 @@ class QubitControl(object):
                     ps_m = (self.suffix[eidx][sidx].dag() * phi_m).norm() ** 2
                     ps += ps_m - ps_p
 
+                    print(ps_m - ps_p)
+            print("ps ---------------- ", ps)
+
             ps *= (1 + r**2) / 2 / r
 
             #print(ps, ps_m, ps_p)
@@ -435,6 +438,7 @@ class QubitControl(object):
             for chan in channels:
                 j, omega, w, idx = chan
                 dDdv[:,idx,:] = ps * dDdv[:,idx,:]
+
         return dDdv
         
         
@@ -474,6 +478,7 @@ class QubitControl(object):
                 grad += self.get_integrand(H0, Hs, M, initial_state, s)
             else :
                 grad += self.get_derivative_presuf(H0, Hs, s, sidx)
+
         
         return torch.from_numpy(self.duration * grad / num_sample)
 
@@ -558,21 +563,6 @@ class QubitControl(object):
           'wq5': 31813391726.380398,
           'wq6': 33300775594.753788}
 
-        '''
-        # raw_freq = 2 *  pi *
-        self.get_qubit_lo_from_drift = np.array([
-            5236376147.050786,
-            5014084426.228487,
-            5107774458.035009,
-            5178450242.236394,
-            5213406970.098254,
-            5063177674.197013,
-            5300001532.8865185])
-
-        self.ws = self.get_qubit_lo_from_drift * 2 * np.pi * 1e-9 * self.dt
-        '''
-
-
         self.hams = {
             0: [0, 1],
             1: [1, 0, 3, 2],
@@ -610,9 +600,22 @@ class QubitControl(object):
             H0 += (np.matmul(sps[j[0]], sms[j[1]]) + np.matmul(sms[j[0]], sps[j[1]])) * \
             (self.ibm_params[jqq] * 1e-9 * self.dt)
 
-        h_eig = qp.Qobj(H0).eigenenergies()
-        self.ws = [h_eig[2], h_eig[1]]
-        #self.ws = [h_eig[1]]
+
+        # raw_freq = 2 *  pi *
+        self.get_qubit_lo_from_drift = np.array([
+            5236376147.050786,
+            5014084426.228487,
+            5107774458.035009,
+            5178450242.236394,
+            5213406970.098254,
+            5063177674.197013,
+            5300001532.8865185])
+
+        self.ws = self.get_qubit_lo_from_drift * 2 * np.pi * 1e-9 * self.dt
+        
+
+        # h_eig = qp.Qobj(H0).eigenenergies()
+        # self.ws = [h_eig[2], h_eig[1]]
 
         self._channels = []
         self._Hs = []
@@ -665,8 +668,6 @@ class QubitControl(object):
         self.losses_energy = []
         for epoch in range(1, self.n_epoch + 1):
             st = "vv: {}".format(self.vv)
-            if epoch % 20 == 0:
-                self.save_plot(epoch)
             
             loss_energy = self.compute_energy(H0, Hs, M, psi0)
             if self.is_noisy:
@@ -688,10 +689,7 @@ class QubitControl(object):
             )
 
             self.logger.write_text(st)
-
             self.losses_energy.append(loss_energy.real)
-            #self.final_state = final_state
-            
             
         return self.vv
             
@@ -883,7 +881,6 @@ class QubitControl(object):
 
         self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
 
-
     def demo_H2(self):
         self.logger.write_text("demo_H2 ========")
         n_qubit = 2
@@ -906,16 +903,8 @@ class QubitControl(object):
             (-0.01128010425623538 * np.kron(self.Z, self.Z)) + \
             (0.18093119978423156 * np.kron(self.X, self.X))
 
-        self.Pauli_M = [[np.kron(self.I, self.I), -1.052373245772859],
-                        [np.kron(self.I, self.Z), 0.39793742484318045],
-                        [np.kron(self.Z, self.I), -0.39793742484318045],
-                        [np.kron(self.Z, self.Z), -0.01128010425623538],
-                        [np.kron(self.X, self.X), 0.18093119978423156]]
-
-        for i in range(len(self.Pauli_M)) :
-            self.Pauli_M[i].append(qp.Qobj(self.Pauli_M[i][0]).eigenstates())
-
         self.train_energy(vv0, H0, Hs, psi0, M)
+        
         
 
     def plot_integrand(self, i, vv0):
@@ -1054,15 +1043,21 @@ class QubitControl(object):
 
 if __name__ == '__main__':
     np.random.seed(0)
-    model = QubitControl(
-        basis='BSpline', n_basis=4, dt=0.22222222222, 
-        duration=1200, n_epoch=2000, lr = 3e-2, num_sample=400, per_step=200, solver=0, sampling_measure=False)
+    # model = QubitControl(
+    #     basis='BSpline', n_basis=4, dt=0.22222222222, 
+    #     duration=1200, n_epoch=2000, lr = 3e-2, num_sample=400, per_step=200, solver=0, sampling_measure=False)
+    # model.demo_CNOT('plain')
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    model.demo_CNOT('plain')
+
+    model = QubitControl(
+        basis='Legendre', n_basis=8, dt=0.22, 
+        duration=720, n_epoch=200, lr = 1e-2, num_sample=6, per_step=100, solver=0)
+    model.demo_H2()
+
     # model.demo_entanglement()
     # model.demo_FD()
     # model.demo_X('plain')

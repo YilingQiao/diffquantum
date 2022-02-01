@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from ibmsim_icml22 import QubitControl
+from main_ibmsim import QubitControl
 
 
 model = QubitControl(
-    basis='Legendre', n_basis=8 , dt=0.22, duration=64, num_sample=10, solver=0,
+    basis='BSpline', n_basis=8 , dt=0.22, duration=64, num_sample=100, solver=0,
     per_step=300)
 
 
