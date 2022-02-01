@@ -22,6 +22,7 @@ Matrixc g_H0;
 std::vector<Matrixc> g_Hs;
 std::vector<std::vector<std::vector<Scalar>>> g_channels;
 Scalar g_duration;
+int g_func_type; // 0: legendre. 1: b_spline
 
 void print_test () {
     std::cout << "hello\n";
@@ -43,7 +44,8 @@ void set_H(
     std::vector<std::vector<Complex>> _H0,
     std::vector<std::vector<std::vector<Complex>>> _Hs,
     std::vector<std::vector<std::vector<Scalar>>> channels,
-    Scalar duration) {
+    Scalar duration,
+    int func_type) {
     int n_qubit = _H0.size();
 
     Matrixc H0(n_qubit, n_qubit);
@@ -66,6 +68,8 @@ void set_H(
 
     g_channels = channels;
     g_duration = duration;
+
+    g_func_type = func_type;
 }
 
 Scalar my_expit(Scalar x) {
@@ -73,6 +77,19 @@ Scalar my_expit(Scalar x) {
     if (x > cutoff) return 1.;
     if (x < -cutoff) return 0.;
     return 1 / (1 + std::exp(-x));
+}
+
+Scalar bspline(int b, int n_basis, Scalar t) {
+    Scalar tau = 1. / (n_basis - 2.);
+    Scalar tau_b = tau * (b - 1.5);
+    Scalar l = tau_b - 1.5 * tau;
+    Scalar r = tau_b + 1.5 * tau;
+    Scalar ans = 0.;
+    if (t < r and t > l) {
+        Scalar norm_factor = - (1.5 * tau) * (1.5 * tau);
+        ans = (t - l) * (t - r) / norm_factor;
+    }
+    return ans;
 }
 
 Scalar f_u(
@@ -95,8 +112,17 @@ Scalar f_u(
 
         for (unsigned int j = 0; j < n_basis; ++j)
         {
-            A += vv[0][idx][j] * std::legendre(j, 2 * t / g_duration - 1);
-            B += vv[1][idx][j] * std::legendre(j, 2 * t / g_duration - 1);
+            if (g_func_type == 0) 
+            {
+                Scalar func_val = std::legendre(j, 2 * t / g_duration - 1);
+                A += vv[0][idx][j] * func_val;
+                B += vv[1][idx][j] * func_val;
+            } else 
+            {
+                Scalar func_val = bspline(j, n_basis, t / g_duration);
+                A += vv[0][idx][j] * func_val;
+                B += vv[1][idx][j] * func_val;
+            }
         }
         N = std::sqrt(A * A + B * B);
         if (abs(N-0.0) < 0.000001) {

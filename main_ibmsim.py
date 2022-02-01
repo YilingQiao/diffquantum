@@ -45,9 +45,9 @@ class QubitControl(object):
         self.is_sample_uniform = is_sample_uniform
         self.per_step = per_step
         self.sampling_measure = sampling_measure
+        self.func_type = 0 if basis == 'Legendre' else 1
 
-        if basis == 'Legendre':
-            self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
+        self.legendre_ps = [legendre(j) for j in range(self.n_basis)]
         
         self.I = np.array([[1.+ 0.j, 0], 
                     [0, 1.]])
@@ -62,6 +62,8 @@ class QubitControl(object):
 
         solvers = [self.trotter_cpp, self.trotter, self.leapfrog]
         self.my_solver = solvers[solver]
+
+        self.get_func_bspline() 
 
         self.logger = Logger(name=method_name)
         self.logger.write_text("arguments ========")
@@ -122,6 +124,26 @@ class QubitControl(object):
         psi0 = np.matmul(curr, psi0)
         psi0 = qp.Qobj(psi0)
         return psi0
+
+    def get_func_bspline(self):
+        tau = 1. / (self.n_basis - 2)
+        tau_bs = [tau * (b - 1.5) for b in range(self.n_basis)]
+
+        norm_factor = - (1.5 * tau) ** 2 
+        
+        def get_bspline_b(b):
+            l = tau_bs[b] - 1.5 * tau
+            r = tau_bs[b] + 1.5 * tau
+            def bspline_b(t):
+                if t >= r or t <= l:
+                    ans = 0.0
+                else:
+                    ans = (t - l) * (t - r) / norm_factor
+                return ans
+
+            return bspline_b
+
+        self.func_bsplines = [get_bspline_b(b) for b in range(self.n_basis)] 
 
     def trotter(self, H_, psi0_, T0, T, **args):
         per_step = self.per_step
@@ -364,10 +386,21 @@ class QubitControl(object):
             for chan in channels:
                 j, omega, w, idx = chan
 
-                legendre_A = [self.vv[0,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
-                legendre_B = [self.vv[1,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
-                A = sum(legendre_A)
-                B = sum(legendre_B)
+                if self.basis == 'Legendre':
+                    coeff_A = [self.vv[0,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) \
+                                    for j in range(self.n_basis)]
+                    coeff_B = [self.vv[1,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) \
+                                    for j in range(self.n_basis)]
+                elif self.basis == 'BSpline':
+                    coeff_A = [self.vv[0,idx,j] * self.func_bsplines[j](s / self.duration) \
+                                    for j in range(self.n_basis)]
+                    coeff_B = [self.vv[1,idx,j] * self.func_bsplines[j](s / self.duration) \
+                                    for j in range(self.n_basis)]
+
+                # legendre_A = [self.vv[0,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
+                # legendre_B = [self.vv[1,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
+                A = sum(coeff_A)
+                B = sum(coeff_B)
                 N = torch.sqrt(torch.square(A)+torch.square(B))
                 Ds = omega * (2 * sgm(N) - 1)/N *(np.cos(w * s) * A + np.sin(w * s) * B)
                 Ds.backward()
@@ -606,7 +639,7 @@ class QubitControl(object):
 
 
         self._H0 = H0
-        dq.set_H(self._H0, self._Hs, self._channels, self.duration)
+        dq.set_H(self._H0, self._Hs, self._channels, self.duration, self.func_type)
         
         return qp.Qobj(H0), Hs
 
@@ -708,7 +741,7 @@ class QubitControl(object):
 
             batch_losses = np.array(losses).mean()
 
-            st = "epoch: {:04d}, loss: {:.4f}, loss_fidelity: {:.4f}".format(
+            st = "epoch: {:04d}, loss: {}, loss_fidelity: {}".format(
                 epoch, 
                 batch_losses, 
                 batch_losses
@@ -746,8 +779,8 @@ class QubitControl(object):
         self.n_Hs = len(Hs.keys()) 
         vv0 = np.random.normal(0, 0.02, 2 * self.n_basis * self.n_funcs)
         vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
-        vv0[:,1,:] *= 30
-        vv0[:,3,:] *= 30
+        # vv0[:,1,:] *= 30
+        # vv0[:,3,:] *= 30
         #vv0[:,2,:] = 0
         #vv0[0,2,0] = 8
 
@@ -1023,16 +1056,15 @@ class QubitControl(object):
 if __name__ == '__main__':
     np.random.seed(0)
     model = QubitControl(
-        basis='Legendre', n_basis=4, dt=0.22222222222, 
-        duration=720, n_epoch=512, lr = 3e-2, num_sample=50, per_step=100, solver=0, sampling_measure=True)
+        basis='BSpline', n_basis=4, dt=0.22222222222, 
+        duration=1200, n_epoch=2000, lr = 3e-2, num_sample=400, per_step=200, solver=0, sampling_measure=False)
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
     # g = model.model_qubit(vv0, num_sample, 'plain')
     # loss0 = model.losses_energy
-    # model.demo_CNOT('plain')
+    model.demo_CNOT('plain')
     # model.demo_entanglement()
-    model.demo_H2_measure()
     # model.demo_FD()
     # model.demo_X('plain')
     # model.demo_CNOT('plain')
