@@ -397,19 +397,15 @@ class QubitControl(object):
                     coeff_B = [self.vv[1,idx,j] * self.func_bsplines[j](s / self.duration) \
                                     for j in range(self.n_basis)]
 
-                # legendre_A = [self.vv[0,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
-                # legendre_B = [self.vv[1,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) for j in range(self.n_basis)]
                 A = sum(coeff_A)
                 B = sum(coeff_B)
                 N = torch.sqrt(torch.square(A)+torch.square(B))
                 Ds = omega * (2 * sgm(N) - 1)/N *(np.cos(w * s) * A + np.sin(w * s) * B)
                 Ds.backward()
-
         dDdv = self.vv.grad.detach().numpy().copy()
 
         for i in range(self.n_qubit):
             phi = self.prefix[sidx]
-            #print(phi)
             
             r = 1.
             d = phi.shape[0]
@@ -425,10 +421,7 @@ class QubitControl(object):
                 if abs(ev) > 1e-5 :
                     ps_p = (self.suffix[eidx][sidx].dag() * phi_p).norm() ** 2
                     ps_m = (self.suffix[eidx][sidx].dag() * phi_m).norm() ** 2
-                    ps += ps_m - ps_p
-
-                    print(ps_m - ps_p)
-            print("ps ---------------- ", ps)
+                    ps += (ps_m - ps_p) * ev
 
             ps *= (1 + r**2) / 2 / r
 
@@ -902,6 +895,15 @@ class QubitControl(object):
             (-0.39793742484318045 * np.kron(self.Z, self.I)) + \
             (-0.01128010425623538 * np.kron(self.Z, self.Z)) + \
             (0.18093119978423156 * np.kron(self.X, self.X))
+
+        self.Pauli_M = [[np.kron(self.I, self.I), -1.052373245772859],
+            [np.kron(self.I, self.Z), 0.39793742484318045],
+            [np.kron(self.Z, self.I), -0.39793742484318045],
+            [np.kron(self.Z, self.Z), -0.01128010425623538],
+            [np.kron(self.X, self.X), 0.18093119978423156]]
+
+        for i in range(len(self.Pauli_M)) :
+            self.Pauli_M[i].append(qp.Qobj(self.Pauli_M[i][0]).eigenstates())
 
         self.train_energy(vv0, H0, Hs, psi0, M)
         
