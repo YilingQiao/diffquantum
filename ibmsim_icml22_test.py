@@ -568,7 +568,8 @@ class QubitControl(object):
 
         self.hams = {
             0: [0, 1],
-            1: [1, 0, 3, 2],
+            #1: [1, 0, 3, 2],
+            1: [1],
             2: [2, 1],
             3: [3, 1, 5],
             4: [4, 5],
@@ -745,8 +746,8 @@ class QubitControl(object):
                 grad_vv += self.compute_energy_grad_MC(H0, Hs, M, psi0)
                 losses.append(loss_fidelity.real)
             
-            #grad_vv[0,2,1:] = 0
-            #grad_vv[1,2,:] = 0
+            grad_vv[0,1,1:] = 0
+            grad_vv[1,1,:] = 0
 
             self.vv.grad = grad_vv
             optimizer.step()
@@ -816,8 +817,9 @@ class QubitControl(object):
         self.n_Hs = len(Hs.keys()) 
         vv0 = np.random.normal(0, 0.02, 2 * self.n_basis * self.n_funcs)
         vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
-        vv0[:,1,:] *= 30
-        vv0[:,3,:] *= 30
+        vv0[:,1,:] = 0
+        vv0[0,1,0] = 10
+        #vv0[:,3,:] *= 30
         #vv0[:,2,:] = 0
         #vv0[0,2,0] = 8
 
@@ -829,6 +831,38 @@ class QubitControl(object):
 
         initial_states = [np.kron(g, g), np.kron(g, e), np.kron(e, e), np.kron(e, g), np.kron(h_, h_)]
         target_states = [np.kron(g, g), np.kron(g, e), np.kron(e, g), np.kron(e, e), np.kron(h_, h_)]
+        print("initial_states", initial_states)
+        print("target_states", target_states)
+
+        self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
+
+
+    def demo_ZZ(self):
+        self.logger.write_text("demo_ZZ ===================")
+        n_qubit = 2
+        self.n_qubit = n_qubit
+
+        H0, Hs = self.IBM_H(n_qubit)
+        self.n_Hs = len(Hs.keys()) 
+        vv0 = np.random.normal(0, 0.02, 2 * self.n_basis * self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+        vv0[:,1,:] = 0
+        vv0[0,1,0] = 10
+        #vv0[:,3,:] *= 30
+        #vv0[:,2,:] = 0
+        #vv0[0,2,0] = 8
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+        # pres = ['00', '01', '10']
+        # posts = ['00', '01', '11']
+        ps = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
+        ms = -1/np.sqrt(2)*e + 1/np.sqrt(2)*g
+        pi = 1j/np.sqrt(2)*e + 1/np.sqrt(2)*g
+        mi = -1j/np.sqrt(2)*e + 1/np.sqrt(2)*g
+
+        initial_states = [np.kron(pi, g), np.kron(mi, g), np.kron(pi, e), np.kron(mi, e), np.kron(g, mi)]
+        target_states = [np.kron(ms, g), np.kron(ps, g), np.kron(ps, e), np.kron(ms, e), np.kron(g, ps)]
         print("initial_states", initial_states)
         print("target_states", target_states)
 
@@ -1051,17 +1085,18 @@ class QubitControl(object):
             self.per_step = ps
             psi1 = self.my_solver(H, psi0, 0, self.duration)
             print(ps, 1-(psi1.dag() * psi1_gt).norm())
-    
+
 
 if __name__ == '__main__':
     # np.random.seed(0)
-    num_repeat = 3
+    num_repeat = 1
     for i in range(num_repeat):
         model = QubitControl(
             basis='Legendre', n_basis=4, dt=0.22222222222, 
-            duration=1056, n_epoch=1200, lr = 1e-2, num_sample=400, per_step=200, solver=0, detail_log = False)
+            duration=306, n_epoch=100, lr = 1e-2, num_sample=100, per_step=200, solver=0, detail_log = False)
         # model.demo_BELL('plain')
-        model.demo_CNOT('plain')
+        # model.demo_CNOT('plain')
+        model.demo_ZZ()
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
