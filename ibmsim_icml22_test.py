@@ -80,6 +80,13 @@ class QubitControl(object):
         return ret
 
     @staticmethod
+    def multi_kron_vec(*args):
+        ret = np.array([1.0])
+        for q in args:
+            ret = np.kron(ret, q)
+        return ret
+
+    @staticmethod
     def multi_dot(*args):
         for i, q in enumerate(args):
             if i == 0:
@@ -551,7 +558,6 @@ class QubitControl(object):
         '''
 
 
-        '''
         # raw_freq = 2 *  pi *
         self.get_qubit_lo_from_drift = np.array([
             5236376147.050786,
@@ -563,7 +569,6 @@ class QubitControl(object):
             5300001532.8865185])
 
         self.ws = self.get_qubit_lo_from_drift * 2 * np.pi * 1e-9 * self.dt
-        '''
 
 
         self.hams = {
@@ -611,8 +616,8 @@ class QubitControl(object):
             H0 += (np.matmul(sps[j[0]], sms[j[1]]) + np.matmul(sms[j[0]], sps[j[1]])) * \
             (self.ibm_params[jqq] * 1e-9 * self.dt)
 
-        h_eig = qp.Qobj(H0).eigenenergies()
-        self.ws = [h_eig[2], h_eig[1]]
+        #h_eig = qp.Qobj(H0).eigenenergies()
+        #self.ws = [h_eig[2], h_eig[1]]
 
         self._channels = []
         self._Hs = []
@@ -877,6 +882,68 @@ class QubitControl(object):
         self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
 
 
+    def demo_ZZ_ZZ(self):
+        self.logger.write_text("demo_ZZ_ZZ ===================")
+        n_qubit = 3
+        self.n_qubit = n_qubit
+
+        H0, Hs = self.IBM_H(n_qubit)
+        self.n_Hs = len(Hs.keys()) 
+        vv0 = np.random.normal(0, 0.02, 2 * self.n_basis * self.n_funcs)
+        vv0 = np.reshape(vv0, [2, self.n_funcs ,self.n_basis])
+        ctrl_chans = [1, 3, 4, 6]
+        for idx in ctrl_chans :
+            vv0[:,idx,:] = 0
+            vv0[0,idx,0] = 8
+        
+        #vv0[:,3,:] *= 30
+        #vv0[:,2,:] = 0
+        #vv0[0,2,0] = 8
+
+        g = np.array([1,0])
+        e = np.array([0,1])
+        # pres = ['00', '01', '10']
+        # posts = ['00', '01', '11']
+        ps = 1/np.sqrt(2)*e + 1/np.sqrt(2)*g
+        ms = -1/np.sqrt(2)*e + 1/np.sqrt(2)*g
+        pi = 1j/np.sqrt(2)*e + 1/np.sqrt(2)*g
+        mi = -1j/np.sqrt(2)*e + 1/np.sqrt(2)*g
+
+        pairs = [([g, g, g],   [g, g, g]),
+                 ([g, g, e],   [g, g, e]),
+                 ([g, e, g],   [g, e, g]),
+                 ([g, e, e],   [g, e, e]),
+                 ([e, g, g],   [e, g, g]),
+                 ([e, g, e],   [e, g, e]),
+                 ([e, e, g],   [e, e, g]),
+                 ([e, e, e],   [e, e, e]),
+                 ([g, g, mi],  [g, g, ps]),
+                 ([g, ms, g],  [g, ps, g]),
+                 ([g, ps, e],  [g, ps, e]),
+                 ([g, e, pi],  [g, e, ps]),
+                 ([e, e, pi],  [e, e, ps]),
+                 ([e, ms, e],  [e, ps, e]),
+                 ([e, ps, g],  [e, ps, g]),
+                 ([e, g, mi],  [e, g, ps]),
+                 ([mi, g, g],  [ps, g, g]),
+                 ([mi, g, e],  [ps, g, e]),
+                 ([pi, e, g],  [ps, e, g]),
+                 ([pi, e, e],  [ps, e, e])]
+        initial_states = []
+        target_states = []
+        for (l1, l2) in pairs :
+            initial_states.append(self.multi_kron_vec(*l1))
+            target_states.append(self.multi_kron_vec(*l2))
+        
+
+        #initial_states = [np.kron(pi, g), np.kron(mi, g), np.kron(pi, e), np.kron(mi, e), np.kron(g, mi)]
+        #target_states =  [np.kron(ms, g), np.kron(ps, g), np.kron(ps, e), np.kron(ms, e), np.kron(g, ps)]
+        print("initial_states", initial_states)
+        print("target_states", target_states)
+
+        self.train_fidelity(vv0, H0, Hs, initial_states, target_states)
+
+
     def demo_BELL(self, method):
         self.logger.write_text("demo_BELL ===================")
         n_qubit = 2
@@ -1100,11 +1167,11 @@ if __name__ == '__main__':
     num_repeat = 1
     for i in range(num_repeat):
         model = QubitControl(
-            basis='Legendre', n_basis=10, dt=0.22222222222, 
-            duration=608, n_epoch=400, lr = 1e-1, num_sample=400, per_step=200, solver=0, detail_log = False)
+            basis='Legendre', n_basis=6, dt=0.22222222222, 
+            duration=1200, n_epoch=100, lr = 1e-2, num_sample=400, per_step=200, solver=0, detail_log = False)
         # model.demo_BELL('plain')
         # model.demo_CNOT('plain')
-        model.demo_ZZ()
+        model.demo_ZZ_ZZ()
   
     # vv0 = np.random.rand(model.n_basis)
     # num_sample = 1
