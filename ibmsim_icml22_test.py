@@ -916,7 +916,7 @@ class QubitControl(object):
                  ([e, e, pi],  [e, e, ps]),
                  ([e, ms, e],  [e, ps, e]),
                  ([e, ps, g],  [e, ps, g]),
-                 ([e, g, ms],  [e, g, ps]),
+                 ([e, g, mi],  [e, g, ps]),
                  ([mi, g, g],  [ps, g, g]),
                  ([mi, g, e],  [ps, g, e]),
                  ([pi, e, g],  [ps, e, g]),
