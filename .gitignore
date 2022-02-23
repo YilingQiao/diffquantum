@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+CMakeFiles/*
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+test/
+test_ibmsim.py

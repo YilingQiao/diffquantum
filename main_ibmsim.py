@@ -11,7 +11,7 @@ from scipy.sparse import csc_matrix
 
 from logger import Logger
 import diffqc as dq 
-
+from torchNode.qnode import QNode
 
 
 
@@ -381,28 +381,31 @@ class QubitControl(object):
 
     def get_derivative_presuf(self, H0, Hs, s, sidx) :
         sgm = torch.nn.Sigmoid()
-        for i in range(len(Hs.keys())):
-            channels = Hs[i]['channels']
-            for chan in channels:
-                j, omega, w, idx = chan
+        with torch.enable_grad():
+            tmpgrad = torch.zeros(self.vv.shape)
+            for i in range(len(Hs.keys())):
+                channels = Hs[i]['channels']
+                for chan in channels:
+                    j, omega, w, idx = chan
 
-                if self.basis == 'Legendre':
-                    coeff_A = [self.vv[0,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) \
-                                    for j in range(self.n_basis)]
-                    coeff_B = [self.vv[1,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) \
-                                    for j in range(self.n_basis)]
-                elif self.basis == 'BSpline':
-                    coeff_A = [self.vv[0,idx,j] * self.func_bsplines[j](s / self.duration) \
-                                    for j in range(self.n_basis)]
-                    coeff_B = [self.vv[1,idx,j] * self.func_bsplines[j](s / self.duration) \
-                                    for j in range(self.n_basis)]
+                    if self.basis == 'Legendre':
+                        coeff_A = [self.vv[0,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) \
+                                        for j in range(self.n_basis)]
+                        coeff_B = [self.vv[1,idx,j] * self.legendre_ps[j](2 * s / self.duration - 1) \
+                                        for j in range(self.n_basis)]
+                    elif self.basis == 'BSpline':
+                        coeff_A = [self.vv[0,idx,j] * self.func_bsplines[j](s / self.duration) \
+                                        for j in range(self.n_basis)]
+                        coeff_B = [self.vv[1,idx,j] * self.func_bsplines[j](s / self.duration) \
+                                        for j in range(self.n_basis)]
 
-                A = sum(coeff_A)
-                B = sum(coeff_B)
-                N = torch.sqrt(torch.square(A)+torch.square(B))
-                Ds = omega * (2 * sgm(N) - 1)/N *(np.cos(w * s) * A + np.sin(w * s) * B)
-                Ds.backward()
-        dDdv = self.vv.grad.detach().numpy().copy()
+                    A = sum(coeff_A)
+                    B = sum(coeff_B)
+                    N = torch.sqrt(torch.square(A)+torch.square(B))
+                    Ds = omega * (2 * sgm(N) - 1)/N *(np.cos(w * s) * A + np.sin(w * s) * B)
+                    tmpgrad += torch.autograd.grad(Ds, self.vv)[0]
+                    #Ds.backward()
+        dDdv = tmpgrad.detach().numpy().copy()
 
         for i in range(self.n_qubit):
             phi = self.prefix[sidx]
@@ -658,20 +661,28 @@ class QubitControl(object):
         psi0 = qp.Qobj(psi0)
         M = qp.Qobj(M)
 
+        def forward(vv):
+            return self.compute_energy(H0, Hs, M, psi0)
+
+        def backward(vv):
+            return self.compute_energy_grad_MC(H0, Hs, M, psi0)
+        
+        H2Layer = QNode({'func':forward, 'grad':backward})
+
         self.losses_energy = []
         for epoch in range(1, self.n_epoch + 1):
             st = "vv: {}".format(self.vv)
             
-            loss_energy = self.compute_energy(H0, Hs, M, psi0)
+            loss_energy =  H2Layer(self.vv)
             if self.is_noisy:
                 loss_energy += np.random.normal(scale=np.abs(loss_energy) / 5)
             loss_l2 = ((self.vv**2).mean(0) * torch.tensor(
                 [i**2 for i in range(self.n_basis)])).mean() * w_l2
             loss = loss_energy + loss_l2
             optimizer.zero_grad()
-            # loss_l2.backward()
-            grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0)
-            self.vv.grad = grad_vv
+            loss_energy.backward()
+            # grad_vv = self.compute_energy_grad_MC(H0, Hs, M, psi0)
+            # self.vv.grad = grad_vv
             optimizer.step()
 
             loss_energy = loss_energy - M.eigenenergies()[0]
@@ -682,7 +693,7 @@ class QubitControl(object):
             )
 
             self.logger.write_text(st)
-            self.losses_energy.append(loss_energy.real)
+            self.losses_energy.append(loss_energy.detach().numpy().real)
             
         return self.vv
             

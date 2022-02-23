@@ -183,7 +183,7 @@ std::vector<Complex> trotter(
     Scalar dt = (T - T0) / n_steps;
     Scalar t = T0;
 
-    Complex i_unit = 1.i;
+    Complex i_unit = 1.j;
 
     Vectorc psi0 = Eigen::Map<Vectorc, Eigen::Unaligned>(_psi0.data(), _psi0.size());
     
