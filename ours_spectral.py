@@ -767,6 +767,88 @@ class OurSpectral(object):
 
         self.train_learning(M, H0, Hs, x, y, n_qubit)
 
+
+    def demo_qaoa_max_cut_n(self, graph_n):
+        self.logger.write_text("Ours demo_qaoa_max_cut_n========")
+        self.logger.write_text("graph_n: {}".format(graph_n))
+        n_qubit = graph_n
+        # graph = [[0, 1], [0, 3], [1, 2], [2, 3]]
+        graph = [[i, (i + 1) % n_qubit] for i in range(n_qubit)]
+        superposition = np.array([0] * 2**n_qubit)
+        for i in range(2**n_qubit):
+            z = np.array([0] * 2**n_qubit)
+            z[i] = 1
+            superposition += z
+        superposition = superposition / np.sqrt(2.0**n_qubit)
+
+        Xs = []
+        I = np.array(
+            [[1, 0], 
+            [0, 1]])
+        X = np.array(
+            [[0, 1], 
+            [1, 0]])
+        Z = np.array(
+            [[1, 0], 
+            [0, -1]])
+
+        II = I
+        for i in range(n_qubit - 1):
+            II = np.kron(II, I)
+
+        OO = II * 0.0
+
+        H0 = OO
+        # H1 = OO
+        H_cost = OO
+        # for i in range(n_qubit):
+        #     if i == 0:
+        #         curr = X
+        #     else:
+        #         curr = I
+        #     for j in range(1, n_qubit):
+        #         if j == i:
+        #             curr = np.kron(curr, X)
+        #         else:
+        #             curr = np.kron(curr, I)
+        #     H1 = H1 + curr
+
+        for e in graph:
+            if 0 in e:
+                curr = Z
+            else:
+                curr = I
+            for i in range(1, n_qubit):
+                if i in e:
+                    curr = np.kron(curr, Z)
+                else:
+                    curr = np.kron(curr, I)
+            H_cost += II - curr
+        H_cost = - H_cost * 0.5
+
+
+        Hs = []
+        # H = OurSpectral.multi_kron(*[O for j in range(n_qubit)])
+        for e in graph:
+            H = OurSpectral.multi_kron(*[I if j not in e else Z for j in range(n_qubit)]) 
+            Hs.append(H)
+
+        for i in range(n_qubit):
+            H = OurSpectral.multi_kron(*[I if j not in [i] else X for j in range(n_qubit)])
+            Hs.append(H)
+
+        Hs = [qp.Qobj(H) for H in Hs]
+
+        H_cost = qp.Qobj(H_cost)
+        H0 = qp.Qobj(H0)
+        superposition = qp.Qobj(superposition)
+        self.train_energy(H_cost, H0, Hs, superposition)
+
+        state, prob = self.find_state(self.final_state)
+        print("cut result is ", bin(state)[2:])
+        return state, prob
+
+
     def demo_qaoa_max_cut4(self):
         self.logger.write_text("Ours demo_qaoa_max_cut4========")
         n_qubit = 4
@@ -1107,14 +1189,25 @@ class OurSpectral(object):
 
 if __name__ == '__main__':
 
-    n_repeat = 2
-    for i in range(n_repeat):
-        ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
-        ours_spectral.demo_qaoa_max_cut4_FD()
+    # graph_n = 11
+
+    # for graph_n in range(4, 15):
+
+    n_rep = 2
+    for i_rep in range(n_rep):
+        for graph_n in range(9, 10):
+            ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=502,
+                method_name="Ours", sampling_measure=False)
+            ours_spectral.demo_qaoa_max_cut_n(graph_n)
+    
+    # n_repeat = 2
+    # for i in range(n_repeat):
+    #     ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Finite-Diff", sampling_measure=True)
+    #     ours_spectral.demo_qaoa_max_cut4_FD()
 
         
-        ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=True)
-        ours_spectral.demo_qaoa_max_cut4()
+    #     ours_spectral = OurSpectral(basis='Legendre', n_basis=6, n_epoch=202,method_name="Ours", sampling_measure=True)
+    #     ours_spectral.demo_qaoa_max_cut4()
 
 
     # ours_spectral.demo_finite_diff(n_samples=50, delta=1e-5, is_MC=False)
