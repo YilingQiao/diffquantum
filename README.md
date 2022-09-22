@@ -1,32 +1,39 @@
 
 # Differentiable Analog Quantum Computing for Learning and Control
-This project can run on python3.8
 
-## Install
+[Jiaqi Leng*](https://jiaqileng.github.io/), [Junbang Liang*](https://pickspeng.github.io/), [Yi-Ling Qiao*](https://ylqiao.net/), [Ming C. Lin](https://www.cs.umd.edu/~lin/), [Xiaodi Wu](https://www.cs.umd.edu/~xwu/)
+ [[arXiv]](https://github.com/YilingQiao/diffquantum) [[GitHub]](https://github.com/YilingQiao/diffquantum)
+
+## Setup
+We have tested our code on Ubuntu and Mac (some code needs to be modified for Mac) with Python 3.8. Below is an example of how to build this library
 ```bash
 git clone git@github.com:YilingQiao/diffquantum.git
 cd diffquantum
 pip install -r requirements.txt
-```
-
-### Python binding
-Build the python binding 
-```bash
 git submodule init
 git submodule update
 python setup.py install
 ```
 
 ## Demos
-1. Run our implementation of IBMQ simulator. 
+1. Run QAOA to solve the maxcut problems. 
 ```bash
-python main_ibmsim.py
+python demo_maxcut.py
 ```
-2. Run simulation without modulation.
-```bash
-python main_nomod.py
+TODO. We are clearning the code for
+2. Run VQE to solve for H2 Ground State and Energy.
+3. Demos for quantum control problems.
+4. Commparisons and draw
+
+## Documentation 
+TODO. We are preparing for more detailed docs.
+
+## Bibtex
 ```
-3. Run GRAPE. 
-```bash
-python main_grape.py
+@inproceedings{leng2022diffaqc,
+  title={Differentiable Analog Quantum Computing for Optimization and Control},
+  author={Leng, Jiaqi and Peng, Yuxiang and Qiao, Yi-Ling and Lin, Ming and Wu, Xiaodi},
+  booktitle={Conference on Neural Information Processing Systems (NeurIPS)},
+  year={2022}
+}
 ```

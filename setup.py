@@ -104,8 +104,8 @@ class CMakeBuild(build_ext):
 setup(
     name="diffqc",
     version="0.0.1",
-    author="Yiling",
-    author_email="yilingq97@gmail.com",
+    author="Jiaqi, Yuxiang, Yiling, Ming, Xiaodi",
+    author_email="yilingq@umd.ext_modules",
     description="",
     long_description="",
     ext_modules=[CMakeExtension("diffqc")],
