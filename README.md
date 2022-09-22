@@ -1,7 +1,7 @@
 
 # Differentiable Analog Quantum Computing for Learning and Control
 
-[Jiaqi Leng*](https://jiaqileng.github.io/), [Junbang Liang*](https://pickspeng.github.io/), [Yi-Ling Qiao*](https://ylqiao.net/), [Ming C. Lin](https://www.cs.umd.edu/~lin/), [Xiaodi Wu](https://www.cs.umd.edu/~xwu/)
+[Jiaqi Leng*](https://jiaqileng.github.io/), [Yuxiang Peng*](https://pickspeng.github.io/), [Yi-Ling Qiao*](https://ylqiao.net/), [Ming C. Lin](https://www.cs.umd.edu/~lin/), [Xiaodi Wu](https://www.cs.umd.edu/~xwu/)
 
 
  [[arXiv]](https://github.com/YilingQiao/diffquantum) [[GitHub]](https://github.com/YilingQiao/diffquantum)
