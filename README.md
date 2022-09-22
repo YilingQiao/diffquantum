@@ -2,6 +2,8 @@
 # Differentiable Analog Quantum Computing for Learning and Control
 
 [Jiaqi Leng*](https://jiaqileng.github.io/), [Junbang Liang*](https://pickspeng.github.io/), [Yi-Ling Qiao*](https://ylqiao.net/), [Ming C. Lin](https://www.cs.umd.edu/~lin/), [Xiaodi Wu](https://www.cs.umd.edu/~xwu/)
+
+
  [[arXiv]](https://github.com/YilingQiao/diffquantum) [[GitHub]](https://github.com/YilingQiao/diffquantum)
 
 ## Setup
@@ -20,13 +22,16 @@ python setup.py install
 ```bash
 python demo_maxcut.py
 ```
-TODO. We are clearning the code for
+TODO. We are still clearning the code for
+
 2. Run VQE to solve for H2 Ground State and Energy.
+
 3. Demos for quantum control problems.
+
 4. Commparisons and draw
 
 ## Documentation 
-TODO. We are preparing for more detailed docs.
+TODO. We are preparing for more detailed documentation.
 
 ## Bibtex
 ```
