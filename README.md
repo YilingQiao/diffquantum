@@ -4,7 +4,7 @@
 [Jiaqi Leng*](https://jiaqileng.github.io/), [Yuxiang Peng*](https://pickspeng.github.io/), [Yi-Ling Qiao*](https://ylqiao.net/), [Ming C. Lin](https://www.cs.umd.edu/~lin/), [Xiaodi Wu](https://www.cs.umd.edu/~xwu/)
 
 
- [[arXiv]](https://github.com/YilingQiao/diffquantum) [[GitHub]](https://github.com/YilingQiao/diffquantum)
+ [[arXiv]](https://arxiv.org/abs/2210.15812) [[GitHub]](https://github.com/YilingQiao/diffquantum)
 
 ## Setup
 We have tested our code on Ubuntu and Mac (some code needs to be modified for Mac) with Python 3.8. Below is an example of how to build this library
