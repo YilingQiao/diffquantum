@@ -154,66 +154,74 @@ class SimulatorPlain(object):
 
     def compute_G(self, M, H, initial_state):
 
-        sgm = torch.nn.Sigmoid()
-        for i in range(self.n_Hs):
-            if self.basis == 'Legendre':
-                coeff_A = [self.spectral_coeff[i,j] * self.legendre_ps[j](2 * s / self.T - 1) \
-                                for j in range(self.n_basis)]
-            elif self.basis == 'BSpline':
-                coeff_A = [self.spectral_coeff[i,j] * self.func_bsplines[j](s / self.T) \
-                                for j in range(self.n_basis)]
+        def compute_dDdv(s):
+            self.spectral_coeff.grad.zero_()
+            sgm = torch.nn.Sigmoid()
+            for i in range(self.n_Hs):
+                if self.basis == 'Legendre':
+                    coeff_A = [self.spectral_coeff[i,j] * self.legendre_ps[j](2 * s / self.T - 1) \
+                                    for j in range(self.n_basis)]
+                elif self.basis == 'BSpline':
+                    coeff_A = [self.spectral_coeff[i,j] * self.func_bsplines[j](s / self.T) \
+                                    for j in range(self.n_basis)]
 
-            A = sum(coeff_A)
-            # Ds = A
-            Ds = (sgm(A) * 2. - 1) * self.omegas[i] 
-            Ds.backward()
+                A = sum(coeff_A)
+                # Ds = A
+                Ds = (sgm(A) * 2. - 1) * self.omegas[i] 
+                Ds.backward()
 
-        dDdv = self.spectral_coeff.grad.detach().numpy().copy()
-        self.spectral_coeff.grad.zero_()
+            dDdv = self.spectral_coeff.grad.detach().numpy().copy()
+            self.spectral_coeff.grad.zero_()
+            return dDdv
 
 
         # term1
-        s1 = np.random.uniform() * self.T # xi
-        s2 = np.random.uniform() * self.T # tau
+        s1 = np.random.uniform() * self.T
+        s2 = np.random.uniform() * self.T
 
-        s3 = np.random.uniform() * self.T # tau
-        s4 = np.random.uniform() * self.T # tau
-
-        s1, s2 = min(s1, s2), max(s1, s2)
+        smin, smax = min(s1, s2), max(s1, s2)
 
         n_parameters = self.n_Hs * self.n_basis
         term1 = np.zeros([n_parameters, n_parameters])
         term2 = np.zeros([n_parameters, n_parameters])
 
+        phi_min = self.my_solver(H, initial_state, 0, smin)
+
         phi_1 = self.my_solver(H, initial_state, 0, s1)
+        phi_2 = self.my_solver(H, initial_state, 0, s2)
 
-        phi_3 = self.my_solver(H, initial_state, 0, s3)
-        phi_4 = self.my_solver(H, initial_state, 0, s4)
+        dDdv_smax = compute_dDdv(smax)
+        dDdv_s1 = compute_dDdv(s1)
+        dDdv_s2 = compute_dDdv(s2)
 
-            
         for ig in range(n_parameters):
             for jg in range(n_parameters):
-                iH, ib = ig // self.n_Hs, ig % self.n_Hs
-                jH, jb = jg // self.n_Hs, jg % self.n_Hs
-                
-                pHpThetai = H[iH+1][0] * dDdv[iH, ib]
-                pHpThetaj = H[jH+1][0] * dDdv[jH, jb]
+                iH, ib = ig // self.n_basis, ig % self.n_basis
+                jH, jb = jg // self.n_basis, jg % self.n_basis
+
+                pHpThetai = H[iH+1][0] * dDdv_smax[iH, ib]
+                pHpThetaj = H[jH+1][0] * dDdv_smax[jH, jb]
                 
                 # term 1
-                P_p = np.eye(n_parameters) + pHpThetaj
-                P_m = np.eye(n_parameters) - pHpThetaj
+                size_H = H[iH+1][0].shape[0]
+                P_p = np.eye(size_H) + pHpThetaj
+                P_m = np.eye(size_H) - pHpThetaj
 
-                ket_p = self.my_solver(H, P_p * phi_1, s1, s2)
-                ket_m = self.my_solver(H, P_m * phi_1, s1, s2)
+                ket_p = self.my_solver(H, P_p * phi_min, smin, smax)
+                ket_m = self.my_solver(H, P_m * phi_min, smin, smax)
 
-                res1 = pHpThetai.matrix_element(ket_p, ket_p)
-                res2 = pHpThetai.matrix_element(ket_m, ket_m)
+                res1 = np.real(pHpThetai.matrix_element(ket_p, ket_p))
+                res2 = np.real(pHpThetai.matrix_element(ket_m, ket_m))
                 term1[ig, jg] = (res1 - res2) / 2. 
 
 
                 # term 2
-                term2[ig, jg] = pHpThetai.matrix_element(phi_3, phi_3) *\
-                    pHpThetaj.matrix_element(phi_4, phi_4)
+
+                pHpThetai_s1 = H[iH+1][0] * dDdv_s1[iH, ib]
+                pHpThetaj_s2 = H[jH+1][0] * dDdv_s2[jH, jb]
+
+                term2[ig, jg] = np.real(pHpThetai_s1.matrix_element(phi_1, phi_1)) *\
+                    np.real(pHpThetaj_s2.matrix_element(phi_2, phi_2))
 
         G = term1 - term2
 
@@ -335,9 +343,6 @@ class SimulatorPlain(object):
         ts = np.linspace(0, self.T, 2)
         optimizer = torch.optim.Adam([self.spectral_coeff], lr=lr)
 
-        G = self.compute_G(M, H, initial_state)
-        G_inv = G.inv()
-
         self.losses_energy = []
         for epoch in range(1, self.n_epoch + 1):
             if epoch % 20 == 0:
@@ -361,7 +366,15 @@ class SimulatorPlain(object):
             optimizer.zero_grad()
             loss_l2.backward()
             grad_coeff = self.compute_energy_grad_MC(M, H, initial_state)
-            grad_coeff = G_in @ grad_coeff
+            
+            # nature gradient
+            G = self.compute_G(M, H, initial_state)
+            grad_coeff = grad_coeff.reshape([-1])
+            grad_coeff = torch.linalg.solve(G, grad_coeff).reshape([self.n_Hs, self.n_basis])
+
+            # self.spectral_coeff = self.spectral_coeff - grad_coeff
+            # optimizer.zero_grad()
+            # use autograd
             self.spectral_coeff.grad = grad_coeff
             optimizer.step()
 
