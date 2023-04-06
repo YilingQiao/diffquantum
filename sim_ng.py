@@ -205,8 +205,8 @@ class SimulatorPlain(object):
                 
                 # term 1
                 size_H = H[iH+1][0].shape[0]
-                P_p = np.eye(size_H) + pHpThetaj
-                P_m = np.eye(size_H) - pHpThetaj
+                P_p = np.eye(size_H) + H[jH+1][0]
+                P_m = np.eye(size_H) - H[jH+1][0]
 
                 ket_p = self.my_solver(H, P_p * phi_min, smin, smax)
                 ket_m = self.my_solver(H, P_m * phi_min, smin, smax)
@@ -214,6 +214,7 @@ class SimulatorPlain(object):
                 res1 = np.real(pHpThetai.matrix_element(ket_p, ket_p))
                 res2 = np.real(pHpThetai.matrix_element(ket_m, ket_m))
                 term1[ig, jg] = (res1 - res2) / 4. 
+                term1[ig, jg] = term1[ig, jg] * dDdv_smin[jH, jb] * dDdv_smax[iH, ib]
 
 
                 # term 2
@@ -373,12 +374,9 @@ class SimulatorPlain(object):
             grad_coeff = grad_coeff.reshape([-1])
             grad_coeff_ng = torch.linalg.solve(G, grad_coeff).reshape([self.n_Hs, self.n_basis])
 
-            print(torch.linalg.solve(G, G))
-            exit()
-            grad_coeff_ng = G.inverse().matmul(grad_coeff).reshape([self.n_Hs, self.n_basis])
+            # print(torch.linalg.solve(G, G))
+            # exit()
             
-            print(grad_coeff.shape)
-            print(G.matmul(grad_coeff_ng.reshape([-1])).shape)
             print(grad_coeff - G.matmul(grad_coeff_ng.reshape([-1])))
             exit()
 
