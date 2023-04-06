@@ -225,7 +225,8 @@ class SimulatorPlain(object):
                 term2[ig, jg] = np.real(pHpThetai_s1.matrix_element(phi_1, phi_1)) *\
                     np.real(pHpThetaj_s2.matrix_element(phi_2, phi_2))
 
-        G = term1 - term2
+        G = term1 - term2 / (self.T**2)
+        print("self.T", self.T)
 
         return torch.from_numpy(G)
 
