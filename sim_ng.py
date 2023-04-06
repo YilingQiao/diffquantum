@@ -191,6 +191,7 @@ class SimulatorPlain(object):
         phi_2 = self.my_solver(H, initial_state, 0, s2)
 
         dDdv_smax = compute_dDdv(smax)
+        dDdv_smin = compute_dDdv(smin)
         dDdv_s1 = compute_dDdv(s1)
         dDdv_s2 = compute_dDdv(s2)
 
@@ -200,7 +201,7 @@ class SimulatorPlain(object):
                 jH, jb = jg // self.n_basis, jg % self.n_basis
 
                 pHpThetai = H[iH+1][0] * dDdv_smax[iH, ib]
-                pHpThetaj = H[jH+1][0] * dDdv_smax[jH, jb]
+                pHpThetaj = H[jH+1][0] * dDdv_smin[jH, jb]
                 
                 # term 1
                 size_H = H[iH+1][0].shape[0]
@@ -212,7 +213,7 @@ class SimulatorPlain(object):
 
                 res1 = np.real(pHpThetai.matrix_element(ket_p, ket_p))
                 res2 = np.real(pHpThetai.matrix_element(ket_m, ket_m))
-                term1[ig, jg] = (res1 - res2) / 2. 
+                term1[ig, jg] = (res1 - res2) / 4. 
 
 
                 # term 2
