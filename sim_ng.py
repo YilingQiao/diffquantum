@@ -370,12 +370,21 @@ class SimulatorPlain(object):
             # nature gradient
             G = self.compute_G(M, H, initial_state)
             grad_coeff = grad_coeff.reshape([-1])
-            grad_coeff = torch.linalg.solve(G, grad_coeff).reshape([self.n_Hs, self.n_basis])
+            grad_coeff_ng = torch.linalg.solve(G, grad_coeff).reshape([self.n_Hs, self.n_basis])
+
+            print(torch.linalg.solve(G, G))
+            exit()
+            grad_coeff_ng = G.inverse().matmul(grad_coeff).reshape([self.n_Hs, self.n_basis])
+            
+            print(grad_coeff.shape)
+            print(G.matmul(grad_coeff_ng.reshape([-1])).shape)
+            print(grad_coeff - G.matmul(grad_coeff_ng.reshape([-1])))
+            exit()
 
             # self.spectral_coeff = self.spectral_coeff - grad_coeff
             # optimizer.zero_grad()
             # use autograd
-            self.spectral_coeff.grad = grad_coeff
+            self.spectral_coeff.grad = grad_coeff_ng
             optimizer.step()
 
             loss_energy = loss_energy - M.eigenenergies()[0]

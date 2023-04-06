@@ -4,7 +4,7 @@ import qutip as qp
 from sim_ng import SimulatorPlain as Sim
 
 
-sim = Sim(lr=5e-2, n_basis=6, n_epoch=202, basis='Legendre')
+sim = Sim(lr=1e-1, n_basis=6, n_epoch=202, basis='Legendre')
 
 sim.logger.write_text("demo_MaxCut_{} ========")
 n_qubit = 4
