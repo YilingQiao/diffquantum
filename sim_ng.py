@@ -197,6 +197,8 @@ class SimulatorPlain(object):
 
         for ig in range(n_parameters):
             for jg in range(n_parameters):
+                if ig != jg:
+                    continue
                 iH, ib = ig // self.n_basis, ig % self.n_basis
                 jH, jb = jg // self.n_basis, jg % self.n_basis
 
@@ -226,7 +228,7 @@ class SimulatorPlain(object):
                     np.real(pHpThetaj_s2.matrix_element(phi_2, phi_2))
 
         G = term1 - term2 / (self.T**2)
-        print("self.T", self.T)
+        # G = G * np.eye(n_parameters)
 
         return torch.from_numpy(G)
 
@@ -378,8 +380,8 @@ class SimulatorPlain(object):
             # print(torch.linalg.solve(G, G))
             # exit()
             
-            print(grad_coeff - G.matmul(grad_coeff_ng.reshape([-1])))
-            exit()
+            # print(grad_coeff - G.matmul(grad_coeff_ng.reshape([-1])))
+            # exit()
 
             # self.spectral_coeff = self.spectral_coeff - grad_coeff
             # optimizer.zero_grad()
